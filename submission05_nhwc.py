@@ -1,7 +1,9 @@
 """제5문제 (NHWC) — ResNet-18 모델 전체 (CIFAR-10, 50 장)   [Part B · 모델 단위 Halide 스케줄]
 
-    prepare_nhwc(params) -> state            한 번만 부른다. 시간을 재지 않는다 (한도 60 초 — JIT 컴파일 포함)
-        params: dict {이름: float32 배열} — weights/resnet18.npz 의 PyTorch 이름 그대로 (weights/resnet18.json 참고)
+    prepare_nhwc(params, calib) -> state     한 번만 부른다. 시간을 재지 않는다 (한도 60 초 — JIT 컴파일 포함)
+        calib:  CIFAR-10 train 1,000 장 uint8 (레이아웃 순서) — 양자화 calibration 등에 써도 된다
+        params: dict {이름: float32 배열} — weights/resnet18.npz 의 PyTorch 이름 그대로 (weights/resnet18.json 참고).
+                model/resnet18.npz 를 올리면 그 파일 (아래 "모델 압축")
                 합성곱 가중치는 (C_out, KH, KW, C_in) OHWI, BN 은 <이름>.weight · .bias · .running_mean · .running_var (eps 1e-5),
                 fc.weight (10, 512) · fc.bias (10,), 전처리 상수 preprocess.mean · preprocess.std (3,)
     infer_nhwc(state, images) -> logits       이 시간을 잰다 (전처리 포함)
@@ -22,15 +24,21 @@
 
 검증 (uv run verify.py submission05_nhwc.py)   ->  success 또는 fail
     규칙    Part A 와 같다 (단일 스레드 · Halide 안 50% 이상 · 금지 목록). 실행 검사는 infer 를 돌려서 한다
-    정확도  샘플 50 장 (samples/cifar10_50.npz) + 무작위 이미지 3 장 · 1 장에서 float64 기준 logits 와
-            상대오차 1e-3 이하, 샘플의 예측 클래스가 기준과 같을 것, (N, 10) float32, 입력 · params 불변.
-            시간을 재는 호출도 매번 무작위로 고른 8 장을 검사한다. weights/ · samples/ 는 바꾸면 fail
-    시간    prepare 한 번 (재지 않음, 60 초 한도) 뒤 infer 를 50 장 묶음으로 준비 3 번, 측정 9 번
-            (호출마다 다른 이미지), 가장 빠른 2 번과 가장 느린 2 번을 뺀 5 번의 평균 (ms) -> 리더보드
+    정확도  CIFAR-10 test 앞 2,000 장 (채점마다 이미지마다 화소 8 개를 ±1) 의 정답 장수 — logits 값은 기준과 비교하지 않는다.
+            최소 1,600 장보다 적으면 fail. 리더보드 점수 = 시간 점수 x 정답률 배율
+            (1 - 0.01 x max(0, float 모델 1,726 장 - 3 - 정답 장수)). 그 밖에 (N, 10) float32 · 유한값,
+            같은 이미지는 묶음과 상관없이 같은 결과, 입력 · params · calib 불변. weights/ · samples/ 는 바꾸면 fail
+    시간    prepare 한 번 (재지 않음, 60 초 한도) 뒤 infer 를 test 50 장 묶음으로 준비 3 번, 측정 9 번
+            (호출마다 다른 이미지, 이 예측도 정답률에 들어간다), 가장 빠른 2 번과 가장 느린 2 번을 뺀 5 번의 평균 (ms)
             참고: 출발점 코드 2691.5 ms · 목표 239.0 ms (조교 정답 x 1.25). 7주차 같은 문제의 Numba 기록과 비교해 보자
 
-금지 · 허용 — Part A 와 같다 (uv run verify.py --rules). prepare 안의 numpy 계산 (BN 접기 · 가중치 다시 늘어놓기) 은
-시간을 재지 않으므로 마음껏 해도 된다. 단 infer 는 Halide 파이프라인 안에서 시간의 50% 이상을 보내야 한다.
+금지 · 허용 — Part A 와 같다 (uv run verify.py --rules). prepare 안의 numpy 계산 (BN 접기 · 가중치 다시 늘어놓기 ·
+양자화 · 프루닝) 은 시간을 재지 않으므로 마음껏 해도 된다. 단 infer 는 Halide 파이프라인 안에서 시간의 50% 이상을 보내야 한다.
+
+모델 압축 (허용) — 양자화 (PTQ · QAT, 비트 수 자유) · 프루닝 (비구조 · 구조) · 재학습 (정답 레이블로 fine-tuning) ·
+calibration. 밖에서 학습한 가중치는 model/<모델>.npz (+ 학습 코드를 model/ 에) 로 올린다. 4 차원 배열은 OIHW 로 저장하면
+레이아웃에 맞게 바뀌어 들어온다. 금지 — 지식증류 (제공 모델이나 다른 모델의 출력 · soft label · 중간 특징을 학습 목표로
+쓰는 것). 채점기는 가려내지 못하므로 조교가 model/ 의 학습 코드를 읽고 확인한다 — 위반이면 그 주 점수 0.
 
 확인: uv run submission05_nhwc.py      (= uv run verify.py submission05_nhwc.py)
 """
@@ -218,8 +226,9 @@ def _schedule(net):
         if "acc" in layer:
             layer["acc"].compute_root()
 
-def prepare_nhwc(params):
-    """(시간 안 잼, 한도 60 초) BN 을 접어 모델 파이프라인을 만들고 JIT 컴파일한다. 반환이 그대로 infer 에 들어간다."""
+def prepare_nhwc(params, calib=None):
+    """(시간 안 잼, 한도 60 초) BN 을 접어 모델 파이프라인을 만들고 JIT 컴파일한다. 반환이 그대로 infer 에 들어간다.
+    calib (CIFAR-10 train 1,000 장 uint8) 은 출발점에서는 쓰지 않는다 — 양자화 calibration 에 쓸 수 있다."""
     net = _build(params)
     _schedule(net)
     run = net.out.compile_to_callable([net.img], hl.get_jit_target_from_environment())

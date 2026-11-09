@@ -33,10 +33,13 @@ Part B 에서는 같은 생각을 **모델 단위로** 넓힙니다 — 모델 �
 | 05 | ResNet-18 (7주차 05 와 같은 구조) | `weights/resnet18.npz` (44.8 MB) | 3.70 GFLOP | 층마다 가로 16 → 1 칸 — 작은 층에서 무엇을 벡터로 · 50 장 묶음으로 가중치 재사용 |
 | 06 | MobileNetV2 (CIFAR-10 용, ReLU6) | `weights/mobilenetv2.npz` (9.2 MB) | 8.80 GFLOP | 층 종류 셋 (1x1 · depthwise · stem) 마다 스케줄 · 블록 안 퓨전 |
 
-- `prepare_<lay>(params)` — 한 번만 부르고 **시간을 재지 않습니다** (한도 60 초, JIT 컴파일 포함). 출발점은 여기서 BN 을
+- `prepare_<lay>(params, calib)` — 한 번만 부르고 **시간을 재지 않습니다** (한도 60 초, JIT 컴파일 포함). `calib` 은
+  CIFAR-10 train 1,000 장 (uint8, calibration 용 — 출발점은 쓰지 않음). 출발점은 여기서 BN 을
   가중치에 접고 (`_fold`), 층마다 Func 를 쌓아 모델 전체를 파이프라인 하나로 만들고 (`_build`), 스케줄을 걸어 (`_schedule`)
   컴파일합니다. 가중치는 `hl.Buffer` 로 파이프라인에 박혀 상수가 됩니다.
-- `infer_<lay>(state, images)` — **이 시간을 잽니다** (전처리 포함). 호출마다 다른 이미지 50 장 (검증에는 3 장 · 1 장도).
+- `infer_<lay>(state, images)` — **이 시간을 잽니다** (전처리 포함). 호출마다 다른 test 이미지 50 장 (검증에는 3 장 · 1 장도).
+- **모델 압축을 허용합니다** (아래 "모델 압축"). logits 를 기준값과 비교하지 않고 **CIFAR-10 test 2,000 장의 정답률** 로
+  채점하므로, 양자화 · 프루닝 · 재학습으로 빨라진 만큼 점수가 오르고 덜 맞힌 만큼 깎입니다.
 - 샘플 50 장은 `samples/cifar10_50.npz`, 모델 구조는 `hint.py` (PyTorch, 참고용), 가중치 이름은 `weights/<모델>.json`.
 
 | 파일 | 입력 `x` | 가중치 | 출력 |
@@ -80,7 +83,7 @@ class Net:                      # 층을 하나씩 Func 로 쌓는다: input · 
 def _build(params):             # 모델 구조 (알고리즘) — hint.py 와 같은 순서로 net.conv(...) 를 쌓는다
 def _schedule(net):             # 여기를 바꾼다 — 출발점은 모든 층 out · acc 를 compute_root
     for layer in net.layers: ...
-def prepare_nhwc(params):       # _build -> _schedule -> compile_to_callable
+def prepare_nhwc(params, calib):  # _build -> _schedule -> compile_to_callable
 def infer_nhwc(state, images):  # 출력 배열을 만들고 실행
 ```
 
@@ -90,6 +93,22 @@ def infer_nhwc(state, images):  # 출력 배열을 만들고 실행
   (`compute_at` 으로 블록 안 퓨전) 는 여러분이 정합니다.
 - 가로가 1 · 2 칸인 층 (ResNet layer3 · 4) 에서는 3x3 합성곱의 탭 대부분이 패딩 (0) 입니다. 알고리즘을 바꿔
   (`RDom.where`) 그 탭을 건너뛰어도 됩니다 — 연산량은 패딩 탭까지 센 값이라 그만큼 GFLOP/s 가 오릅니다.
+
+## 모델 압축 (05 · 06)
+
+| | 허용 · 금지 | 어떻게 |
+|---|---|---|
+| 양자화 | 허용 — PTQ · QAT, 비트 수 · 단위 (per-tensor · per-channel) 자유 | 정수 연산도 Halide Func 로 (`hl.Int(8)` · `hl.Int(32)` 누적 …). `calib` 으로 범위를 잴 수 있다 |
+| 프루닝 | 허용 — 비구조 (0 인 가중치 건너뛰기) · 구조 (채널 · 필터 없애기) | `prepare` 에서 하거나, 밖에서 해서 `model/` 로 올린다 |
+| 재학습 | 허용 — **정답 레이블** 로 fine-tuning (프루닝 · 양자화 뒤 정답률 되찾기) | 밖 (PyTorch 등) 에서 학습해 `model/<모델>.npz` 와 **학습 코드를 `model/` 에** 함께 올린다 |
+| calibration | 허용 | `prepare` 의 `calib` (CIFAR-10 train 1,000 장) |
+| **지식증류** | **금지** — 제공 모델 (또는 다른 모델) 의 출력 · soft label · 중간 특징을 학습 목표로 쓰는 것 | 채점기로는 가려낼 수 없어 **조교가 `model/` 의 학습 코드를 읽고 확인** 합니다. 위반이면 그 주 점수 0 |
+
+- `model/resnet18.npz` · `model/mobilenetv2.npz` 가 있으면 채점기는 `weights/` 대신 그 파일을 `params` 로 넘깁니다.
+  배열 이름 · 모양 · dtype 은 자유입니다 (`prepare` 가 읽으면 된다). 4 차원 배열은 OIHW 로 저장하면 레이아웃에 맞게 (NHWC 는
+  OHWI) 바뀌어 들어오고, 정수 dtype 은 그대로입니다. 모델 구조는 제공 모델에서 출발합니다 (프루닝으로 줄이는 것은 되고,
+  다른 구조로 새로 학습하는 것은 안 됩니다).
+- 연산량 (GFLOP/s 의 분자) 은 언제나 **제공 dense 모델** 의 값입니다 — 프루닝 · 양자화로 줄인 시간만큼 GFLOP/s 가 오릅니다.
 
 ## 구현 규칙
 
@@ -105,7 +124,8 @@ def infer_nhwc(state, images):  # 출력 배열을 만들고 실행
   `fft`, `convolve` …) 는 쓸 수 없습니다.
 - **`import` 는 `numpy`, `halide`, `math` 만 허용합니다** (Numba 도 이번 주에는 안 됩니다). 같은 폴더의 다른 파일도 불러올 수
   없습니다. `eval · exec · getattr · setattr · open` 같은 우회도 금지입니다.
-- **입력 배열 (과 Part B 의 `params`) 을 직접 수정하면 안 됩니다.** `weights/` 와 `samples/` 의 파일도 바꾸면 안 됩니다.
+- **입력 배열 (과 Part B 의 `params` · `calib`) 을 직접 수정하면 안 됩니다.** `weights/` 와 `samples/` 의 파일도 바꾸면
+  안 됩니다 (압축 · 재학습한 모델은 `model/` 에).
 - **채점 파일은 고치지 않습니다.** `verify.py` · `pyproject.toml` · `uv.lock` · `.python-version` 과 `.github/workflows/` 는 받은
   그대로 두세요 (`uv add` 도 하지 마세요 — 분석에 필요한 것은 `uv run --with <패키지>`). 리더보드는 결과를 받을 때마다 GitHub 에서
   그 실행과 커밋을 확인합니다 (진행 중인 그 커밋의 채점 실행인지, 그 실행을 돌리는 Raspberry Pi 가 보냈는지, 위 파일들이
@@ -118,9 +138,13 @@ def infer_nhwc(state, images):  # 출력 배열을 만들고 실행
 제출한 12 개 파일은 각각 자동으로 검증합니다. 기준 기계는 **Raspberry Pi 5 (ARM Cortex-A76, NEON)** 이며 코어 1 개만
 사용합니다.
 
-- **정확도** — 입력은 검증할 때마다 새로 뽑고 float64 기준값과 비교합니다. Part A 는 실제 크기 + **작은 크기 2 개**
-  (다른 H · W · C, 예: 가로 9 칸 · 채널 8 개) 에서 상대오차 2e-4 이하. Part B 는 샘플 50 장 (예측 클래스도 같아야 함) +
-  무작위 이미지 3 장 · 1 장에서 logits 상대오차 1e-3 이하. 시간을 재는 호출의 출력도 매번 검사합니다 (Part B 는 무작위 8 장).
+- **정확도 (Part A)** — 입력은 검증할 때마다 새로 뽑고 float64 기준값과 비교합니다. 실제 크기 + **작은 크기 2 개**
+  (다른 H · W · C, 예: 가로 9 칸 · 채널 8 개) 에서 상대오차 2e-4 이하. 시간을 재는 호출의 출력도 매번 검사합니다.
+- **정확도 (Part B)** — CIFAR-10 test 앞 **2,000 장** 의 정답 장수입니다. 채점마다 이미지마다 무작위 화소 값 8 개를 ±1
+  바꿉니다 (미리 계산해 둔 답을 쓰지 못하게 — float 모델의 정답 장수는 거의 그대로입니다). 시간을 재는 9 번의 묶음도 이
+  test 이미지이고 그 예측이 정답률에 들어갑니다. 최소 정답 (ResNet-18 1,600 장 · MobileNetV2 1,700 장 = 80 · 85%) 보다
+  적으면 `fail`. 그 밖에 (N, 10) float32 · 유한값, 같은 이미지는 묶음과 상관없이 같은 결과 (3 장 묶음과 1 장),
+  입력 · `params` · `calib` 불변을 봅니다.
 - **실행 시간** — 준비 실행 3 회 (첫 호출의 JIT 컴파일 포함, 한도 300 초) 뒤 서로 다른 입력으로 9 회를 재서, 가장 빠른 2 회와
   가장 느린 2 회를 뺀 **5 회의 평균** 을 씁니다. Part B 는 `infer` 만 잽니다 (`prepare` 는 60 초 한도).
 
@@ -160,7 +184,7 @@ uv sync                                   # 처음 한 번 (numpy, halide 22.1.0
 uv run verify.py                          # 12 파일 모두
 uv run verify.py submission02_nhwc.py     # 한 파일
 uv run verify.py 03                       # 03_nchw, 03_nhwc
-uv run verify.py --no-time                # 규칙 · 정확도 · 실행 검사만
+uv run verify.py --no-time                # 규칙 · 정확도 · 실행 검사만 (05 · 06 은 test 2,000 장을 돌리므로 출발점은 수 분)
 uv run verify.py submission01_nchw.py --verbose --json /tmp/result.json
 ```
 
@@ -215,6 +239,10 @@ push 하면 Classroom50 의 Raspberry Pi 5 Runner 가 12 개 파일을 각각 �
   | `t >= BASE_MS` (통과만) | 배점 x 0.2 |
   | `GOAL_MS <= t < BASE_MS` | 배점 x (0.2 + 0.8 x log(BASE_MS / t) / log(BASE_MS / GOAL_MS)) — 목표 시간에서 배점 만점 |
   | `t < GOAL_MS` | 배점 x GOAL_MS / t — **상한이 없습니다.** 목표보다 2 배 빠르면 배점의 2 배 |
+
+  **05 · 06 은 여기에 정답률 배율을 곱합니다** — `1 - 0.01 x max(0, float 모델 정답 - 3 - 정답)` (0 ~ 1). float 모델
+  (ResNet-18 1,726 장 · MobileNetV2 1,846 장) 보다 3 장 넘게 덜 맞히면 한 장마다 1% 씩 깎이고, 103 장 덜 맞히면 0 입니다
+  (10주차와 같은 배율, 3 장은 화소 잡음의 흔들림). 예: 시간 점수 40 점에 20 장 덜 맞히면 40 x 0.83 = 33.2 점.
 
   실행 (푸시) 마다 12 개 파일의 점수를 더해 가장 높은 실행으로 순위를 매기고, 점수가 같으면 파일별 GFLOP/s 의 조화평균이
   큰 쪽이 앞섭니다. 실패한 파일은 0 점입니다.

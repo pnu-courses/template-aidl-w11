@@ -25,8 +25,14 @@ Classroom50 / GitHub Actions 에서는 리더보드 결과 접수까지 끝나�
 
 정확도: 입력은 채점마다 새로 뽑고(VERIFY_SEED 로 재현) float64 기준값은 이 파일이 직접 계산한다.
   Part A  실제 크기 + 작은 크기 2 개, 전체 출력, 상대오차 2e-4
-  Part B  샘플 50 장(예측 클래스도 같아야 한다) + 무작위 3 장 + 무작위 1 장, logits 상대오차 1e-3
-  시간 측정 호출도 매번 검사한다 (Part A 는 전체 출력, Part B 는 무작위로 고른 8 장).
+  Part A  시간 측정 호출도 매번 전체 출력을 검사한다.
+  Part B  모델 압축 (양자화 · 프루닝 · 재학습 · calibration) 을 허용하므로 logits 를 기준값과 비교하지 않고
+          CIFAR-10 test 앞 TEST_TOTAL 장의 정답률로 채점한다. 이미지마다 채점마다 무작위 화소 값 8 개를 ±1 바꾸고
+          (미리 계산해 둔 답을 쓰지 못하게), 시간을 재는 9 번의 묶음도 이 test 이미지이며 정답률에 들어간다.
+          정답 장수가 MIN_CORRECT 보다 적으면 fail. 리더보드 점수 = 시간 점수 x 정답률 배율
+          (1 - ACCURACY_PENALTY x max(0, float 모델 정답 - ACCURACY_SLACK - 정답), 0 ~ 1).
+          그 밖에 (N, 10) float32 · 유한값 · 같은 이미지는 묶음과 상관없이 같은 결과 (상대오차 1e-3) · 입력 · params 불변.
+          가중치는 model/<모델>.npz 가 있으면 그 파일, 없으면 weights/<모델>.npz. 지식증류는 금지 (코드 리뷰).
   weights/ 와 samples/ 의 파일은 SHA-256 으로 원본인지 확인한다.
 
 제출 구현은 Halide 파이프라인 (Func.realize · Pipeline.realize · Callable 호출) 안에서 시간의 50% 이상을
@@ -80,7 +86,13 @@ WARMUP = 3                  # 측정 전 준비 호출 횟수 (측정에서 제�
 REPEAT = 9                  # 시간 측정 횟수 (호출마다 다른 입력)
 TRIM = 2                    # 가장 빠른 측정값과 가장 느린 측정값을 각각 이만큼 버리고 나머지 평균을 쓴다
 N_E2E = 50                  # Part B 묶음 크기
-PROBE_IMAGES = 8            # Part B 시간 측정 호출마다 기준값과 비교하는 이미지 수 (무작위로 고른다)
+PROBE_IMAGES = 8            # (쓰지 않음 — 10 주차 이전과 같은 FIXTURE 구성을 위해 남김)
+TEST_TOTAL = 2000           # Part B test 정답률을 재는 장수 (CIFAR-10 test 의 앞 2,000 장, 10 주차와 같다)
+TEST_NOISE = 8              # 채점마다 test 이미지마다 무작위 화소 값 8 개를 ±1 바꾼다 — 미리 계산해 둔 답을 쓰지 못하게
+ACCURACY_PENALTY = 0.01     # 정답률 배율 = 1 - 0.01 x max(0, float 정답 - SLACK - 정답): 한 장마다 1% 씩
+ACCURACY_SLACK = 3          # 잡음 때문에 float 모델도 흔들리는 장수 — 이만큼은 덜 맞혀도 깎지 않는다
+MIN_CORRECT = {"05": 1600, "06": 1700}     # 이보다 적게 맞히면 fail (ResNet-18 80% · MobileNetV2 85%, 10 주차와 같다)
+CONSIST_TOL = 1e-3          # 같은 이미지를 다른 묶음에 넣어도 같은 결과여야 한다 (상대오차)
 LAYOUTS = ("nchw", "nhwc")
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -99,8 +111,8 @@ PROBLEMS = {
                sizes=[(4, 56, 56, 24, 6), (1, 7, 9, 8, 6), (2, 8, 8, 16, 4)]),                 # (N, H, W, C, t)
     "04": dict(part="A", fn="preprocess_stem", name="전처리 + MobileNetV2 stem: uint8 -> 정규화 -> conv3x3/2 + BN + ReLU6",
                sizes=[(4, 224, 224, 32), (1, 17, 19, 8), (2, 8, 8, 16)]),                      # (N, H, W, C_out)
-    "05": dict(part="B", model="resnet18", name="ResNet-18 end-to-end (CIFAR-10, 50 장)"),
-    "06": dict(part="B", model="mobilenetv2", name="MobileNetV2 end-to-end (CIFAR-10, 50 장)"),
+    "05": dict(part="B", model="resnet18", name="ResNet-18 end-to-end (CIFAR-10, 50 장)", float=1726),
+    "06": dict(part="B", model="mobilenetv2", name="MobileNetV2 end-to-end (CIFAR-10, 50 장)", float=1846),
 }
 
 # 참고 시간 (ms) — Raspberry Pi 5, 코어 1 개에서 위 측정 방식(5 회 평균)으로 잰 값.
@@ -120,6 +132,8 @@ DATA_SHA256 = {
     "weights/resnet18.npz": "b5c7d203bd8068577a6eaa431abf251c967156019cd45a33502731f9a78b7b5f",
     "weights/mobilenetv2.npz": "c52c1f22335380398848d69ebcf16d4d3fc90d7a633403e2ad38a18f2f7a4671",
     "samples/cifar10_50.npz": "dbd00afb4724aa26301a6126aabee310cf62e4471ef1e26f913b52c69c5e063f",
+    "samples/cifar10_test.npz": "003e0f78170cb2914fcc621d3fa65455857ae28119144c1f9310b62cad89a5af",
+    "samples/cifar10_calib.npz": "f157686bcd8de9165345c7ab2e660708fb3d42c71740deb315650b2c70403644",
 }
 
 # 리더보드가 같은 채점 기준의 결과만 받도록 하는 버전 (11 주차는 내려받는 기준값 파일이 없다)
@@ -127,7 +141,8 @@ HALIDE_VERSION = "22.1.0"     # pyproject.toml · uv.lock 과 같은 판
 
 FIXTURE_ID = hashlib.sha256(json.dumps({
     "schema": FIXTURE_SCHEMA, "period": PERIOD, "problems": PROBLEMS, "tol": [TOL, TOL_E2E],
-    "timing": [WARMUP, REPEAT, TRIM], "probe_images": PROBE_IMAGES, "data": DATA_SHA256, "halide": HALIDE_VERSION,
+    "timing": [WARMUP, REPEAT, TRIM], "probe_images": PROBE_IMAGES,
+    "accuracy": [TEST_TOTAL, TEST_NOISE, ACCURACY_PENALTY, ACCURACY_SLACK, MIN_CORRECT, CONSIST_TOL], "data": DATA_SHA256, "halide": HALIDE_VERSION,
 }, sort_keys=True).encode()).hexdigest()[:20]
 LEADERBOARD_URL = "http://192.168.1.22:7777"
 
@@ -382,15 +397,49 @@ def mobilenetv2(o, img, p):
 MODELS = {"resnet18": (resnet18, CIFAR_MEAN, CIFAR_STD), "mobilenetv2": (mobilenetv2, CIFAR_MEAN, CIFAR_STD)}
 
 
-def load_params(model, layout):
-    """weights/<model>.npz -> {이름: float32 배열}. 합성곱 가중치는 레이아웃 순서 (OIHW / OHWI),
-    전처리 상수 preprocess.mean / preprocess.std (3,) 를 더한다."""
-    with np.load(HERE / "weights" / f"{model}.npz") as f:
-        p = {k: to_layout(f[k].astype(np.float32), layout) for k in f.files}
+def submitted_model(model):
+    """학생이 올린 압축 · 재학습 모델 model/<model>.npz (없으면 None)."""
+    path = HERE / "model" / f"{model}.npz"
+    return path if path.is_file() else None
+
+
+def load_params(model, layout, submitted=False):
+    """weights/<model>.npz -> {이름: 배열}. 4 차원 배열 (합성곱 가중치) 은 레이아웃 순서 (OIHW / OHWI) 로 바꾸고,
+    전처리 상수 preprocess.mean / preprocess.std (3,) 를 더한다 (파일에 있으면 그 값).
+    submitted 이면 model/<model>.npz 가 있을 때 그 파일 — 배열 이름 · 모양 · dtype 은 학생 마음 (prepare 가 읽는다).
+    4 차원 배열은 OIHW 로 저장해 두면 레이아웃에 맞게 바뀌어 들어간다. 정수 dtype 은 그대로 둔다."""
+    path = (submitted and submitted_model(model)) or HERE / "weights" / f"{model}.npz"
+    with np.load(path, allow_pickle=False) as f:
+        p = {}
+        for k in f.files:
+            a = f[k]
+            a = a.astype(np.float32) if a.dtype.kind == "f" else a
+            p[k] = to_layout(a, layout) if a.ndim == 4 else a
     _, mean, std = MODELS[model]
-    p["preprocess.mean"] = np.array(mean, np.float32)
-    p["preprocess.std"] = np.array(std, np.float32)
+    p.setdefault("preprocess.mean", np.array(mean, np.float32))
+    p.setdefault("preprocess.std", np.array(std, np.float32))
     return p
+
+
+def load_calib(layout):
+    """samples/cifar10_calib.npz -> images uint8 (1000, ...) — CIFAR-10 train 에서 클래스마다 100 장 (calibration 용)."""
+    with np.load(HERE / "samples" / "cifar10_calib.npz") as f:
+        return to_layout(f["images"], layout)
+
+
+def test_batches(layout, seed):
+    """CIFAR-10 test 앞 TEST_TOTAL 장 (채점마다 이미지마다 화소 값 TEST_NOISE 개를 ±1) 을 N_E2E 장씩 -> ([묶음, ...], labels)."""
+    with np.load(HERE / "samples" / "cifar10_test.npz") as f:
+        images, labels = f["images"][:TEST_TOTAL], f["labels"][:TEST_TOTAL].astype(np.int64)
+    rng = _rng(91, seed)
+    flat = images.reshape(len(images), -1).astype(np.int16)
+    rows = np.repeat(np.arange(len(images)), TEST_NOISE)
+    cols = np.concatenate([rng.choice(flat.shape[1], TEST_NOISE, replace=False) for _ in range(len(images))])
+    flat[rows, cols] += rng.choice(np.array([-1, 1], np.int16), rows.size)
+    flat[rows, cols] = np.where((flat[rows, cols] < 0) | (flat[rows, cols] > 255), 2 * images.reshape(len(images), -1)
+                                [rows, cols].astype(np.int16) - flat[rows, cols], flat[rows, cols])     # 0 · 255 는 반대쪽으로
+    images = to_layout(flat.reshape(images.shape).astype(np.uint8), layout)
+    return [np.ascontiguousarray(images[i:i + N_E2E]) for i in range(0, TEST_TOTAL, N_E2E)], labels
 
 
 def load_samples(layout):
@@ -416,7 +465,7 @@ def flops_b(model):
     """묶음 50 장의 FLOP (합성곱 · 완전연결층의 곱셈-덧셈 x 2)."""
     if model not in _FLOPS_B:
         Ref.flops = 0
-        MODELS[model][0](Ref, np.zeros((1, 3, 32, 32), np.uint8), load_params(model, "nchw"))
+        MODELS[model][0](Ref, np.zeros((1, 3, 32, 32), np.uint8), load_params(model, "nchw"))   # 제공 모델 (dense)
         _FLOPS_B[model] = Ref.flops * N_E2E
     return _FLOPS_B[model]
 
@@ -457,6 +506,12 @@ RULES_TEXT = """\
     eval · exec · compile · __import__ · getattr · setattr · globals · vars · open
     (Part A 는 호출마다 x · 가중치 · BN 을 바꾸므로 BN 접기 · 가중치 다시 늘어놓기도 시간 안에 들어간다.
      Part B 는 prepare 에서 BN 을 접고 파이프라인을 만들어 컴파일해 두지만, 이미지는 호출마다 바뀐다)
+    Part B 지식증류: 제공 모델 (또는 다른 모델) 의 출력 · soft label · 중간 특징을 학습 목표로 쓰는 것
+                    (채점기로는 가려내지 못하므로 model/ 의 학습 코드를 조교가 읽고 확인한다)
+허용 (Part B)
+    모델 압축 — 양자화 (PTQ · QAT, 비트 수 자유, 정수 연산도 Halide 로) · 프루닝 (비구조 · 구조) · 재학습
+    (정답 레이블로 fine-tuning) · calibration (prepare 의 calib = CIFAR-10 train 1,000 장). 밖에서 학습한 모델은
+    model/<모델>.npz 와 학습 코드 (model/ 폴더) 를 함께 올린다. 정답률은 test 2,000 장 (채점마다 화소 몇 개를 ±1) 으로 잰다
 허용
     halide 의 Func · Var · RDom · Expr · ImageParam · Param · Buffer · Pipeline · BoundaryConditions ·
     모든 스케줄 명령 (split · tile · reorder · vectorize · unroll · compute_at · store_at · compute_root ·
@@ -561,13 +616,27 @@ def validate_a(fn, num, layout, seed, timing):
     return out
 
 
+def _check_logits(y, n):
+    """(통과?, 설명) — (n, 10) float32 유한값."""
+    if not isinstance(y, np.ndarray) or y.shape != (n, 10):
+        return False, f"모양이 다릅니다: {getattr(y, 'shape', type(y))} != {(n, 10)}"
+    if y.dtype != np.float32:
+        return False, f"dtype 이 float32 가 아닙니다: {y.dtype}"
+    if not np.all(np.isfinite(y)):
+        return False, "NaN 또는 inf 가 있습니다"
+    return True, "(N, 10) float32"
+
+
 def validate_b(prepare, infer, model, layout, seed, timing):
-    """Part B: prepare 한 번 + 샘플 50 장 + 무작위 이미지 2 묶음. (결과, state, 원본 params)."""
-    params = load_params(model, layout)
+    """Part B: prepare 한 번 + 샘플 50 장 + 무작위 이미지 3 장 · 1 장 (모양 · 같은 이미지는 같은 결과).
+    logits 값은 기준과 비교하지 않는다 (압축 허용) — 정확도는 grade_file 의 test 정답률. (결과, state, 원본 params)."""
+    params = load_params(model, layout, submitted=True)
     keep = {k: v.copy() for k, v in params.items()}
+    calib = load_calib(layout)
+    calib0 = calib.copy()
     started = time.perf_counter()
     try:
-        state = prepare(params)
+        state = prepare(params, calib)
     except Exception as e:                          # noqa: BLE001
         return [("prepare", False, f"{type(e).__name__}: {e}")], None, keep
     timing["prepare_s"] = time.perf_counter() - started
@@ -575,9 +644,10 @@ def validate_b(prepare, infer, model, layout, seed, timing):
     if timing["prepare_s"] > PREPARE_LIMIT:
         out.append(("prepare", False, f"{timing['prepare_s']:.0f} 초 > 한도 {PREPARE_LIMIT:.0f} 초"))
     samples, labels = load_samples(layout)
-    cases = [("샘플 50 장", samples, True), ("무작위 3 장", random_images(layout, 3, seed * 100 + 1), False),
-             ("무작위 1 장", random_images(layout, 1, seed * 100 + 2), False)]
-    for i, (label, img, check_pred) in enumerate(cases):
+    three = random_images(layout, 3, seed * 100 + 1)
+    cases = [("샘플 50 장", samples), ("무작위 3 장", three), ("무작위 1 장 (3 장의 둘째와 같은 이미지)", three[1:2].copy())]
+    outputs = []
+    for i, (label, img) in enumerate(cases):
         img0 = img.copy()
         try:
             started = time.perf_counter()
@@ -586,28 +656,36 @@ def validate_b(prepare, infer, model, layout, seed, timing):
                 timing["first_s"] = time.perf_counter() - started
         except Exception as e:                      # noqa: BLE001
             out.append((label, False, f"{type(e).__name__}: {e}"))
+            outputs.append(None)
             continue
-        ref = reference_b(model, layout, img0, keep)
-        ok, msg = _check_out(y, ref, TOL_E2E)
-        if ok and check_pred:
-            top2 = np.sort(ref, axis=1)[:, -2:]
-            clear = (top2[:, 1] - top2[:, 0]) > 1e-3 * np.abs(ref).max()
-            wrong = np.flatnonzero(clear & (np.argmax(y, 1) != np.argmax(ref, 1)))
-            if wrong.size:
-                ok, msg = False, f"예측 클래스가 다른 이미지 {wrong.size} 장 (예: {wrong[:5].tolist()})"
-            else:
-                msg += f" · 정답률 {np.mean(np.argmax(y, 1) == labels):.0%}"
+        ok, msg = _check_logits(y, img0.shape[0])
+        if ok and i == 0:
+            msg += f" · 정답률 {np.mean(np.argmax(y, 1) == labels):.0%} (참고)"
+        if ok and i == 2 and outputs[1] is not None:
+            err = relerr(y, np.asarray(outputs[1][1:2], np.float64))
+            if err > CONSIST_TOL:
+                ok, msg = False, f"같은 이미지인데 3 장 묶음 때와 결과가 다릅니다 (상대오차 {err:.1e})"
         if ok and not np.array_equal(img, img0):
             ok, msg = False, "입력 이미지를 바꿨습니다"
         out.append((label, ok, msg))
+        outputs.append(np.array(y) if ok else None)
     if not all(np.array_equal(params[k], keep[k]) for k in keep):
         out.append(("params", False, "params 배열을 바꿨습니다 (복사해서 쓰세요)"))
+    if not np.array_equal(calib, calib0):
+        out.append(("calib", False, "calib 이미지를 바꿨습니다"))
     return out, state, keep
+
+
+def accuracy_factor(num, correct):
+    """정답률 배율 = 1 - ACCURACY_PENALTY x max(0, float 정답 - ACCURACY_SLACK - 정답), 0 ~ 1."""
+    short = max(0, PROBLEMS[num]["float"] - ACCURACY_SLACK - correct)
+    return min(1.0, max(0.0, 1.0 - ACCURACY_PENALTY * short))
 
 
 def check_data(model):
     """Part B 가 쓰는 제공 파일이 원본인지. 문제가 있으면 설명, 없으면 None."""
-    for name in (f"weights/{model}.npz", "samples/cifar10_50.npz"):
+    for name in (f"weights/{model}.npz", "samples/cifar10_50.npz", "samples/cifar10_test.npz",
+                 "samples/cifar10_calib.npz"):
         path = HERE / name
         if not path.is_file():
             return f"{name} 이 없습니다"
@@ -625,16 +703,15 @@ def benchmark_inputs(key, seed, state=None):
     그다음은 측정 REPEAT 번 (index 1..REPEAT, 서로 다른 입력).
 
     호출마다 **다른 입력** 을 주므로, 앞 호출의 결과를 저장해 두었다가 다시 쓰는 제출은 빨라지지 않는다.
-    Part A 는 x · 가중치 · BN 이 모두 바뀌고, Part B 는 state 는 그대로 두고 이미지 50 장이 바뀐다.
+    Part A 는 x · 가중치 · BN 이 모두 바뀌고, Part B 는 state 는 그대로 두고 test 이미지 50 장 (채점마다 잡음) 이 바뀐다.
     """
     num, layout = key.split("_")
     if PROBLEMS[num]["part"] == "A":
         size = PROBLEMS[num]["sizes"][0]
         make = lambda index: make_args(num, layout, size, seed=seed * 100 + 10 + index)    # noqa: E731
     else:
-        warm = load_samples(layout)[0]
-        make = lambda index: (state, warm if index == 0 else                               # noqa: E731
-                              random_images(layout, N_E2E, seed * 100 + 10 + index))
+        batches = test_batches(layout, seed)[0]
+        make = lambda index: (state, batches[index])                                       # noqa: E731
     args = make(0)
     for _ in range(WARMUP):
         yield 0, args
@@ -661,7 +738,7 @@ def trimmed_mean(samples):
 
 def probe_check(key, y, args, originals, params, rng):
     """시간 측정 호출 하나의 결과를 검사한다. 문제가 있으면 설명, 없으면 None.
-    Part A 는 전체 출력, Part B 는 무작위로 고른 PROBE_IMAGES 장의 logits 를 float64 기준값과 비교한다."""
+    Part A 는 전체 출력을 float64 기준값과 비교한다. Part B 는 모양 · 유한값만 보고, 예측은 test 정답률에 들어간다."""
     num, layout = key.split("_")
     if PROBLEMS[num]["part"] == "A":
         ok, msg = _check_out(y, reference_a(num, layout, originals), TOL)
@@ -669,13 +746,7 @@ def probe_check(key, y, args, originals, params, rng):
             ok, msg = False, "입력 배열을 바꿨습니다"
         return None if ok else msg
     images = originals[1]
-    n = images.shape[0]
-    if not isinstance(y, np.ndarray) or y.shape != (n, 10):
-        return f"모양이 다릅니다: {getattr(y, 'shape', type(y))} != {(n, 10)}"
-    rows = np.sort(rng.choice(n, min(PROBE_IMAGES, n), replace=False))
-    ok, msg = _check_out(y[rows], reference_b(PROBLEMS[num]["model"], layout, images[rows], params), TOL_E2E)
-    if ok and not np.all(np.isfinite(y)):
-        ok, msg = False, "NaN 또는 inf 가 있습니다"
+    ok, msg = _check_logits(y, images.shape[0])
     if ok and not np.array_equal(args[1], images):
         ok, msg = False, "입력 이미지를 바꿨습니다"
     return None if ok else msg
@@ -708,18 +779,20 @@ def problem_points(total=100.0):
     return points
 
 
-def leaderboard_points(key, ms):
+def leaderboard_points(key, ms, correct=None):
     """리더보드에서 이 파일이 받는 점수 (leaderboard-for-aidl 의 store.file_points 와 같은 식).
         t >= BASE_MS          배점 x 0.2                       (통과)
         GOAL_MS <= t < BASE   배점 x (0.2 + 0.8 x log(BASE / t) / log(BASE / GOAL))
         t < GOAL_MS           배점 x GOAL / t                  (목표보다 빠르면 상한 없이 빠른 만큼 = GFLOP/s 에 비례)
+    Part B (05 · 06) 는 여기에 정답률 배율 accuracy_factor(correct) 을 곱한다.
     """
     base, goal = TIME_MS[key]
     points = problem_points()[key]
+    factor = accuracy_factor(key[:2], correct) if PROBLEMS[key[:2]]["part"] == "B" and correct is not None else 1.0
     if ms < goal:
-        return points * goal / ms
+        return points * goal / ms * factor
     fraction = 0.0 if ms >= base else math.log(base / ms) / math.log(base / goal)
-    return points * (CORRECT_RATIO + (1 - CORRECT_RATIO) * fraction)
+    return points * (CORRECT_RATIO + (1 - CORRECT_RATIO) * fraction) * factor
 
 
 def gflops(key, ms):
@@ -1020,6 +1093,7 @@ def grade_file(key, path=None, timed=True, baseline=False):
         return failure(key, "; ".join(what for _, what in violations), checks=checks, violations=violations, seed=seed)
     run = fns[-1]
     samples = []
+    predicted = {}                                  # Part B: test 묶음 번호 -> 예측 클래스
     if timed:
         rng = np.random.default_rng([seed, 99])
         for index, args in benchmark_inputs(key, seed, state):
@@ -1033,9 +1107,33 @@ def grade_file(key, path=None, timed=True, baseline=False):
             problem = probe_check(key, y, args, originals, params, rng)
             if problem:
                 return failure(key, f"시간 측정 입력 {index}: {problem}", checks=checks, seed=seed)
+            if pr["part"] == "B":
+                predicted[index] = np.argmax(y, 1)
             samples.append(elapsed)
             log(f"  측정 {index}/{REPEAT}: {elapsed * 1e3:.2f} ms")
             del y, args, originals
+    accuracy = None
+    if pr["part"] == "B":
+        batches, labels = test_batches(layout, seed)
+        try:
+            for index, batch in enumerate(batches):
+                if index in predicted:
+                    continue
+                y = run(state, batch.copy())
+                ok, msg = _check_logits(y, batch.shape[0])
+                if not ok:
+                    return failure(key, f"test 묶음 {index}: {msg}", checks=checks, seed=seed)
+                predicted[index] = np.argmax(y, 1)
+        except Exception as e:                      # noqa: BLE001
+            return failure(key, f"test 묶음: {type(e).__name__}: {e}", checks=checks, seed=seed)
+        pred = np.concatenate([predicted[i] for i in range(len(batches))])
+        correct = int(np.count_nonzero(pred == labels))
+        accuracy = {"test_correct": correct, "test_total": TEST_TOTAL,
+                    "accuracy_factor": accuracy_factor(num, correct), "submitted_model": bool(submitted_model(pr["model"]))}
+        log(f"  test 정답 {correct:,} / {TEST_TOTAL:,} 장 (float 모델 {pr['float']:,} 장)")
+        if correct < MIN_CORRECT[num]:
+            return failure(key, f"test 정답 {correct:,} / {TEST_TOTAL:,} 장 — 최소 {MIN_CORRECT[num]:,} 장 "
+                                f"({MIN_CORRECT[num] / TEST_TOTAL:.0%}) 보다 적습니다", checks=checks, seed=seed, **accuracy)
     profile_args = next(benchmark_inputs(key, seed, state))[1]
     profile = profile_call(module, entry_names(key)[-1], profile_args)
     violations = check_runtime(before) + check_profile(profile)
@@ -1048,6 +1146,8 @@ def grade_file(key, path=None, timed=True, baseline=False):
               "machine": {"system": platform.system(), "arch": platform.machine(), "model": machine()}}
     if "prepare_s" in timing:
         result["prepare_s"] = timing["prepare_s"]
+    if accuracy:
+        result.update(accuracy)
     result["halide_version"] = getattr(hl, "__version__", HALIDE_VERSION)
     if timed:
         result["ms"] = trimmed_mean(samples) * 1000                 # 리더보드에 보내는 값
@@ -1060,7 +1160,7 @@ def grade_file(key, path=None, timed=True, baseline=False):
             naive, naive_state = naive_starter(num, layout)[0], None
         else:
             prepare_b, naive = naive_starter(num, layout)
-            naive_state = prepare_b(load_params(pr["model"], layout))
+            naive_state = prepare_b(load_params(pr["model"], layout), load_calib(layout))
         result["naive_ms"] = trimmed_mean(measure(naive, benchmark_inputs(key, seed, naive_state))) * 1000
     return result
 
@@ -1108,7 +1208,12 @@ def time_summary(result):
     return (f"  {result['ms']:.1f} ms  (준비 {WARMUP}회 뒤 {REPEAT}회 측정, 가장 빠른 {TRIM}회와 가장 느린 {TRIM}회를 뺀 "
             f"{REPEAT - 2 * TRIM}회 평균{note})\n"
             f"  출발점 코드 {base:g} ms · 목표 {goal:g} ms · {result.get('gflops', 0):.1f} GFLOP/s · "
-            f"리더보드 점수 {leaderboard_points(result['problem'], result['ms']):.2f} (배점 {problem_points()[result['problem']]:g})\n"
+            f"리더보드 점수 {leaderboard_points(result['problem'], result['ms'], result.get('test_correct')):.2f} "
+            f"(배점 {problem_points()[result['problem']]:g})\n"
+            + (f"  test 정답 {result['test_correct']:,} / {result['test_total']:,} 장 (float 모델 "
+               f"{PROBLEMS[result['problem'][:2]]['float']:,} 장) -> 정답률 배율 {result['accuracy_factor']:.2f}"
+               + (" · model/ 의 모델" if result.get("submitted_model") else "") + "\n"
+               if result.get("test_correct") is not None else "") +
             f"  측정값(ms, 측정 순서): {samples}")
 
 
@@ -1152,9 +1257,15 @@ def period_spec():
         "ranking": "points", "correct_ratio": CORRECT_RATIO, "beyond_goal": "speedup",
         # 실행 확인 (리더보드 integrity.py): 이 파일들이 템플릿과 같은 커밋의 결과만 받는다
         "integrity": {"protected": ["verify.py", "pyproject.toml", "uv.lock", ".python-version"]},
+        # 05 · 06 의 test 정답률: Runner 가 결과의 test_correct 에 적어 보낸다. 파일 점수 x 정답률 배율
+        # (1 - penalty x max(0, float_correct - slack - test_correct)), min_correct 미만은 0 점 (채점기에서도 fail)
+        "accuracy": {"field": "test_correct", "total": TEST_TOTAL, "source": "runner", "penalty": ACCURACY_PENALTY,
+                     "slack": ACCURACY_SLACK, "points": True},
         "problems": [{"key": key, "filename": f"submission{key}.py", "title": PROBLEMS[key[:2]]["name"],
                       "check_count": 3, "base_ms": base, "goal_ms": goal, "flops": problem_flops(key),
-                      "points": problem_points()[key]}
+                      "points": problem_points()[key],
+                      **({"model": PROBLEMS[key[:2]]["model"], "float_correct": PROBLEMS[key[:2]]["float"],
+                          "min_correct": MIN_CORRECT[key[:2]]} if PROBLEMS[key[:2]]["part"] == "B" else {})}
                      for key, (base, goal) in TIME_MS.items()],
     }
 
