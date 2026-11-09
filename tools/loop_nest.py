@@ -1,9 +1,11 @@
 """제출 파일의 Halide 루프 구조를 본다 (분석용 — 채점과 무관, import 제한 없음).
 
     uv run tools/loop_nest.py 02_nhwc            # submission02_nhwc.py 의 루프 구조 (print_loop_nest)
+    uv run tools/loop_nest.py 05_nhwc            # Part B 는 모델 전체 (층이 많아 길다 — | less)
     uv run tools/loop_nest.py 02_nhwc --stmt     # + 낮춘 코드 (lowered stmt) 를 tools/out/02_nhwc.stmt.html 로
 
-제출 파일에 출발점 코드처럼 _algorithm() 과 _schedule(s) 가 있어야 한다 (이름을 바꿨다면 이 파일도 맞춰 고친다).
+제출 파일에 출발점 코드처럼 _algorithm() · _schedule(s) (Part A) 또는 _build(params) · _schedule(net) (Part B) 가
+있어야 한다 (이름을 바꿨다면 이 파일도 맞춰 고친다).
 """
 import importlib.util
 import os
@@ -46,8 +48,15 @@ def main(argv):
         return 1
     key = argv[0]
     module = load(key)
-    s = module._algorithm()
-    module._schedule(s)
+    if hasattr(module, "_build"):                     # Part B (05 · 06): 모델 전체 파이프라인
+        import verify
+        num, layout = key.split("_")
+        net = module._build(verify.load_params(verify.PROBLEMS[num]["model"], layout))
+        module._schedule(net)
+        s = {"out": net.out, "inputs": [net.img]}
+    else:                                             # Part A (01 – 04)
+        s = module._algorithm()
+        module._schedule(s)
     print(capture_stderr(s["out"].print_loop_nest))
     if "--stmt" in argv:
         out = ROOT / "tools" / "out"

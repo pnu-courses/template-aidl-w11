@@ -1,18 +1,22 @@
-"""제11주 과제 검증기 — Halide 스케줄 (알고리즘과 스케줄의 분리), 단일 스레드, 8 파일, 실행 시간(ms).
+"""제11주 과제 검증기 — Halide 스케줄 (알고리즘과 스케줄의 분리), 단일 스레드, 12 파일, 실행 시간(ms).
 
     uv run verify.py submission01_nchw.py
+    uv run verify.py submission05_nhwc.py
     uv run verify.py 03                    03_nchw, 03_nhwc 두 파일
-    uv run verify.py                       8 파일 모두
+    uv run verify.py                       12 파일 모두
     uv run verify.py --no-time             규칙 · 정확도 · 실행 검사만 (리더보드에 내지 않는다)
-    uv run verify.py submission02_nhwc.py --verbose --json /tmp/result.json
+    uv run verify.py submission06_nhwc.py --verbose --json /tmp/result.json
 
 파일별 표준 출력은 success 또는 fail 한 줄이다. success 이면 실행 시간(ms)과 측정값을, fail 이면 이유를
 표준 오류로 더 적는다. 규칙 · 정확도 · 실행 검사를 통과하면 목표 시간보다 느려도 success 다.
 Classroom50 / GitHub Actions 에서는 리더보드 결과 접수까지 끝나야 success 다. 실패는 fail, ms=null 로 제출한다.
 
-문제 (PROBLEMS) — 4 개 x 레이아웃 2 개 (NCHW, NHWC). 7주차 Part A 와 같은 연산 · 같은 크기다.
-  01 ResNet-18 stem  02 ResNet-18 BasicBlock  03 MobileNetV2 inverted residual  04 전처리 + MobileNetV2 stem
-  호출마다 입력 · 가중치 · BN 이 바뀐다.
+문제 (PROBLEMS) — 6 개 x 레이아웃 2 개 (NCHW, NHWC). 7주차와 같은 문제 · 같은 크기 · 같은 검증이다.
+  Part A 연산 (퓨전)  01 ResNet-18 stem  02 ResNet-18 BasicBlock  03 MobileNetV2 inverted residual
+                      04 전처리 + MobileNetV2 stem.  호출마다 입력 · 가중치 · BN 이 바뀐다.
+  Part B 모델 전체    05 ResNet-18  06 MobileNetV2.  CIFAR-10 이미지 50 장 (uint8) -> logits (50, 10).
+                      prepare_<lay>(params) 는 한 번 부르고 재지 않는다 (Halide 파이프라인을 만들고 JIT 컴파일하는 곳).
+                      infer_<lay>(state, images) 를 잰다.
 기준 기계는 Raspberry Pi 5 (Cortex-A76) 코어 1 개다. 참고 시간은 TIME_MS 에 있다
 (BASE_MS = 출발점 코드 (스케줄 없음), GOAL_MS = 조교 정답 x 1.25).
 
@@ -20,7 +24,10 @@ Classroom50 / GitHub Actions 에서는 리더보드 결과 접수까지 끝나�
 뺀 5 회의 평균이다. 리더보드에는 최솟값이 아니라 이 평균을 보낸다.
 
 정확도: 입력은 채점마다 새로 뽑고(VERIFY_SEED 로 재현) float64 기준값은 이 파일이 직접 계산한다.
-  실제 크기 + 작은 크기 2 개, 전체 출력, 상대오차 2e-4. 시간 측정 호출도 매번 전체 출력을 검사한다.
+  Part A  실제 크기 + 작은 크기 2 개, 전체 출력, 상대오차 2e-4
+  Part B  샘플 50 장(예측 클래스도 같아야 한다) + 무작위 3 장 + 무작위 1 장, logits 상대오차 1e-3
+  시간 측정 호출도 매번 검사한다 (Part A 는 전체 출력, Part B 는 무작위로 고른 8 장).
+  weights/ 와 samples/ 의 파일은 SHA-256 으로 원본인지 확인한다.
 
 제출 구현은 Halide 파이프라인 (Func.realize · Pipeline.realize · Callable 호출) 안에서 시간의 50% 이상을
 보내야 한다. Halide 의 스레드는 1 개로 고정하고 (HL_NUM_THREADS=1) 코어 하나에 묶는다 — parallel() 은 써도
@@ -58,6 +65,7 @@ import halide as hl  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 COMPILE_LIMIT = 300.0       # 첫 호출(JIT 컴파일 포함) 한도 (초)
+PREPARE_LIMIT = 60.0        # Part B prepare 한도 (초) — 파이프라인 만들기와 JIT 컴파일 포함
 WORKER_LIMIT = 540.0        # 파일 하나의 채점 프로세스 한도 (초) — Classroom50 테스트 한도(최대 600 초)보다 짧게
 
 
@@ -66,15 +74,22 @@ WORKER_LIMIT = 540.0        # 파일 하나의 채점 프로세스 한도 (초) 
 PERIOD = "week11"
 FIXTURE_SCHEMA = 1
 EPS = 1e-5                  # BN eps
-TOL = 2e-4                  # 상대오차 허용치
+TOL = 2e-4                  # Part A 상대오차 허용치
+TOL_E2E = 1e-3              # Part B logits 상대오차 허용치 (층이 많아 float32 오차가 쌓인다)
 WARMUP = 3                  # 측정 전 준비 호출 횟수 (측정에서 제외)
 REPEAT = 9                  # 시간 측정 횟수 (호출마다 다른 입력)
 TRIM = 2                    # 가장 빠른 측정값과 가장 느린 측정값을 각각 이만큼 버리고 나머지 평균을 쓴다
+N_E2E = 50                  # Part B 묶음 크기
+PROBE_IMAGES = 8            # Part B 시간 측정 호출마다 기준값과 비교하는 이미지 수 (무작위로 고른다)
 LAYOUTS = ("nchw", "nhwc")
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
-# 번호 -> 문제. sizes 는 (실제 크기, 작은 크기 1, 작은 크기 2). 7주차 Part A 와 같다.
+CIFAR_MEAN = (0.4914, 0.4822, 0.4465)
+CIFAR_STD = (0.2470, 0.2435, 0.2616)
+MBV2_CFG = [(1, 16, 1, 1), (6, 24, 2, 1), (6, 32, 3, 2), (6, 64, 4, 2), (6, 96, 3, 1), (6, 160, 3, 2), (6, 320, 1, 1)]
+
+# 번호 -> 문제. sizes 는 Part A 의 (실제 크기, 작은 크기 1, 작은 크기 2). 7주차와 같다.
 PROBLEMS = {
     "01": dict(part="A", fn="stem", name="ResNet-18 stem: conv7x7/2 + BN + ReLU + maxpool3x3/2",
                sizes=[(1, 224, 224, 64), (1, 17, 23, 8), (2, 32, 32, 16)]),                    # (N, H, W, C_out)
@@ -84,24 +99,35 @@ PROBLEMS = {
                sizes=[(4, 56, 56, 24, 6), (1, 7, 9, 8, 6), (2, 8, 8, 16, 4)]),                 # (N, H, W, C, t)
     "04": dict(part="A", fn="preprocess_stem", name="전처리 + MobileNetV2 stem: uint8 -> 정규화 -> conv3x3/2 + BN + ReLU6",
                sizes=[(4, 224, 224, 32), (1, 17, 19, 8), (2, 8, 8, 16)]),                      # (N, H, W, C_out)
+    "05": dict(part="B", model="resnet18", name="ResNet-18 end-to-end (CIFAR-10, 50 장)"),
+    "06": dict(part="B", model="mobilenetv2", name="MobileNetV2 end-to-end (CIFAR-10, 50 장)"),
 }
 
-# 참고 시간 (ms) — Raspberry Pi 5, CI 와 같은 uv 환경, 코어 1 개에서 위 측정 방식(5 회 평균)으로 잰 값.
-#   BASE_MS  출발점 코드 (스케줄 없음 — 단계마다 compute_root) 의 시간,  GOAL_MS  조교 정답 시간 x 1.25 (0.1 ms 단위 올림)
-# 다시 잴 때:  uv run verify.py --answers ../answers-w11 --baseline   -> 맨 끝에 제안 TIME_MS 가 찍힌다
-TIME_MS = {             # 파일: (BASE_MS, GOAL_MS)   2026-11-09 보정 (sota01, 코어 1 개)
+# 참고 시간 (ms) — Raspberry Pi 5, 코어 1 개에서 위 측정 방식(5 회 평균)으로 잰 값.
+#   BASE_MS  출발점 코드 (단계마다 compute_root, 벡터 · 타일 없음) 의 시간,  GOAL_MS  조교 정답 시간 x 1.25 (0.1 ms 단위 올림)
+# 다시 잴 때:  uv run verify.py --answers ../answers-w11 --baseline   (starter/ 에 출발점 사본) -> 맨 끝에 제안 TIME_MS
+TIME_MS = {             # 파일: (BASE_MS, GOAL_MS)   2026-11-10 보정 (sota01, 코어 1 개)
     "01_nchw": (135.6, 12.5), "01_nhwc": (134.6, 16.3),
     "02_nchw": (324.3, 25.7), "02_nhwc": (354.2, 21.2),
     "03_nchw": (134.2, 18.8), "03_nhwc": (108.5, 19.2),
     "04_nchw": (74.3, 6.5), "04_nhwc": (76.4, 8.5),
+    "05_nchw": (3233.3, 311.7), "05_nhwc": (2691.5, 239.0),
+    "06_nchw": (7358.4, 1077.2), "06_nhwc": (5533.2, 772.2),
+}
+
+# 제공 데이터의 SHA-256 — 가중치나 샘플을 바꾸면 기준값도 같이 바뀌므로 원본인지 먼저 확인한다
+DATA_SHA256 = {
+    "weights/resnet18.npz": "b5c7d203bd8068577a6eaa431abf251c967156019cd45a33502731f9a78b7b5f",
+    "weights/mobilenetv2.npz": "c52c1f22335380398848d69ebcf16d4d3fc90d7a633403e2ad38a18f2f7a4671",
+    "samples/cifar10_50.npz": "dbd00afb4724aa26301a6126aabee310cf62e4471ef1e26f913b52c69c5e063f",
 }
 
 # 리더보드가 같은 채점 기준의 결과만 받도록 하는 버전 (11 주차는 내려받는 기준값 파일이 없다)
 HALIDE_VERSION = "22.1.0"     # pyproject.toml · uv.lock 과 같은 판
 
 FIXTURE_ID = hashlib.sha256(json.dumps({
-    "schema": FIXTURE_SCHEMA, "period": PERIOD, "problems": PROBLEMS, "tol": TOL,
-    "timing": [WARMUP, REPEAT, TRIM], "halide": HALIDE_VERSION,
+    "schema": FIXTURE_SCHEMA, "period": PERIOD, "problems": PROBLEMS, "tol": [TOL, TOL_E2E],
+    "timing": [WARMUP, REPEAT, TRIM], "probe_images": PROBE_IMAGES, "data": DATA_SHA256, "halide": HALIDE_VERSION,
 }, sort_keys=True).encode()).hexdigest()[:20]
 LEADERBOARD_URL = "http://192.168.1.22:7777"
 
@@ -214,7 +240,7 @@ class Ref:
 
 
 
-# ================================================= 연산 정의 (기준값이 쓰는 식)
+# ================================================= Part A — 연산 정의 (기준값이 쓰는 식)
 
 def stem(o, x, w, bn):
     return o.maxpool(o.relu(o.bn(o.conv(x, w, 2, 3), *bn)))
@@ -312,6 +338,89 @@ def flops_a(num, size):
     return 0
 
 
+# ================================================= Part B — 모델 (기준값이 쓰는 식)
+
+def _bnp(p, pre):
+    return p[pre + ".weight"], p[pre + ".bias"], p[pre + ".running_mean"], p[pre + ".running_var"]
+
+
+def resnet18(o, img, p):
+    x = o.preprocess(img, p["preprocess.mean"], p["preprocess.std"])
+    x = o.maxpool(o.relu(o.bn(o.conv(x, p["conv1.weight"], 2, 3), *_bnp(p, "bn1"))))
+    for li, s0 in zip((1, 2, 3, 4), (1, 2, 2, 2)):
+        for bi in (0, 1):
+            pre = f"layer{li}.{bi}."
+            s = s0 if bi == 0 else 1
+            y = o.relu(o.bn(o.conv(x, p[pre + "conv1.weight"], s, 1), *_bnp(p, pre + "bn1")))
+            y = o.bn(o.conv(y, p[pre + "conv2.weight"], 1, 1), *_bnp(p, pre + "bn2"))
+            idt = x
+            if pre + "downsample.0.weight" in p:
+                idt = o.bn(o.conv(x, p[pre + "downsample.0.weight"], s, 0), *_bnp(p, pre + "downsample.1"))
+            x = o.relu(o.add(y, idt))
+    return o.linear(o.gap(x), p["fc.weight"], p["fc.bias"])
+
+
+def mobilenetv2(o, img, p):
+    x = o.preprocess(img, p["preprocess.mean"], p["preprocess.std"])
+    x = o.relu6(o.bn(o.conv(x, p["stem.conv.weight"], 1, 1), *_bnp(p, "stem.bn")))
+    i, cin = 0, 32
+    for t, c, n, s0 in MBV2_CFG:
+        for j in range(n):
+            s = s0 if j == 0 else 1
+            pre = f"blocks.{i}."
+            y = x
+            if t != 1:
+                y = o.relu6(o.bn(o.conv(y, p[pre + "expand.conv.weight"], 1, 0), *_bnp(p, pre + "expand.bn")))
+            y = o.relu6(o.bn(o.dwconv(y, p[pre + "dw.conv.weight"], s, 1), *_bnp(p, pre + "dw.bn")))
+            y = o.bn(o.conv(y, p[pre + "project.conv.weight"], 1, 0), *_bnp(p, pre + "project.bn"))
+            x = o.add(y, x) if (s == 1 and cin == c) else y
+            i, cin = i + 1, c
+    x = o.relu6(o.bn(o.conv(x, p["head.conv.weight"], 1, 0), *_bnp(p, "head.bn")))
+    return o.linear(o.gap(x), p["fc.weight"], p["fc.bias"])
+
+
+MODELS = {"resnet18": (resnet18, CIFAR_MEAN, CIFAR_STD), "mobilenetv2": (mobilenetv2, CIFAR_MEAN, CIFAR_STD)}
+
+
+def load_params(model, layout):
+    """weights/<model>.npz -> {이름: float32 배열}. 합성곱 가중치는 레이아웃 순서 (OIHW / OHWI),
+    전처리 상수 preprocess.mean / preprocess.std (3,) 를 더한다."""
+    with np.load(HERE / "weights" / f"{model}.npz") as f:
+        p = {k: to_layout(f[k].astype(np.float32), layout) for k in f.files}
+    _, mean, std = MODELS[model]
+    p["preprocess.mean"] = np.array(mean, np.float32)
+    p["preprocess.std"] = np.array(std, np.float32)
+    return p
+
+
+def load_samples(layout):
+    """samples/cifar10_50.npz -> (images uint8, labels). images 는 레이아웃 순서."""
+    with np.load(HERE / "samples" / "cifar10_50.npz") as f:
+        return to_layout(f["images"], layout), f["labels"].astype(np.int64)
+
+
+def random_images(layout, n, seed):
+    return to_layout(_rng(77, seed).integers(0, 256, (n, 3, 32, 32), dtype=np.uint8), layout)
+
+
+def reference_b(model, layout, images, params):
+    """float64 기준 logits (N, 10)."""
+    nchw = {k: (from_layout(v, layout) if v.ndim == 4 else v) for k, v in params.items()}
+    return MODELS[model][0](Ref, from_layout(images, layout), nchw)
+
+
+_FLOPS_B = {}
+
+
+def flops_b(model):
+    """묶음 50 장의 FLOP (합성곱 · 완전연결층의 곱셈-덧셈 x 2)."""
+    if model not in _FLOPS_B:
+        Ref.flops = 0
+        MODELS[model][0](Ref, np.zeros((1, 3, 32, 32), np.uint8), load_params(model, "nchw"))
+        _FLOPS_B[model] = Ref.flops * N_E2E
+    return _FLOPS_B[model]
+
+
 # ================================================= 규칙 (정적 분석)
 
 ALLOWED_IMPORTS = {"numpy", "halide", "math"}
@@ -346,7 +455,8 @@ RULES_TEXT = """\
         apply_autoscheduler (자동 스케줄러는 분석 스크립트에서 돌리고, 나온 스케줄을 코드로 옮겨 적는다) · gpu*
     numpy · halide · math 밖의 import (같은 폴더의 다른 파일, numba, scipy, torch 포함)
     eval · exec · compile · __import__ · getattr · setattr · globals · vars · open
-    (호출마다 x · 가중치 · BN 을 바꾸므로 BN 접기 · 가중치 다시 늘어놓기도 시간 안에 들어간다)
+    (Part A 는 호출마다 x · 가중치 · BN 을 바꾸므로 BN 접기 · 가중치 다시 늘어놓기도 시간 안에 들어간다.
+     Part B 는 prepare 에서 BN 을 접고 파이프라인을 만들어 컴파일해 두지만, 이미지는 호출마다 바뀐다)
 허용
     halide 의 Func · Var · RDom · Expr · ImageParam · Param · Buffer · Pipeline · BoundaryConditions ·
     모든 스케줄 명령 (split · tile · reorder · vectorize · unroll · compute_at · store_at · compute_root ·
@@ -430,7 +540,7 @@ def _same(a, b):
 
 
 def validate_a(fn, num, layout, seed, timing):
-    """실제 크기 + 작은 크기 2 개. [(이름, 통과?, 설명), ...]. 첫 호출 시간은 timing["first_s"]."""
+    """Part A: 실제 크기 + 작은 크기 2 개. [(이름, 통과?, 설명), ...]. 첫 호출 시간은 timing["first_s"]."""
     out = []
     for i, size in enumerate(PROBLEMS[num]["sizes"]):
         label = ("실제 크기 " if i == 0 else "작은 크기 ") + str(size)
@@ -451,16 +561,80 @@ def validate_a(fn, num, layout, seed, timing):
     return out
 
 
+def validate_b(prepare, infer, model, layout, seed, timing):
+    """Part B: prepare 한 번 + 샘플 50 장 + 무작위 이미지 2 묶음. (결과, state, 원본 params)."""
+    params = load_params(model, layout)
+    keep = {k: v.copy() for k, v in params.items()}
+    started = time.perf_counter()
+    try:
+        state = prepare(params)
+    except Exception as e:                          # noqa: BLE001
+        return [("prepare", False, f"{type(e).__name__}: {e}")], None, keep
+    timing["prepare_s"] = time.perf_counter() - started
+    out = []
+    if timing["prepare_s"] > PREPARE_LIMIT:
+        out.append(("prepare", False, f"{timing['prepare_s']:.0f} 초 > 한도 {PREPARE_LIMIT:.0f} 초"))
+    samples, labels = load_samples(layout)
+    cases = [("샘플 50 장", samples, True), ("무작위 3 장", random_images(layout, 3, seed * 100 + 1), False),
+             ("무작위 1 장", random_images(layout, 1, seed * 100 + 2), False)]
+    for i, (label, img, check_pred) in enumerate(cases):
+        img0 = img.copy()
+        try:
+            started = time.perf_counter()
+            y = infer(state, img)
+            if i == 0:
+                timing["first_s"] = time.perf_counter() - started
+        except Exception as e:                      # noqa: BLE001
+            out.append((label, False, f"{type(e).__name__}: {e}"))
+            continue
+        ref = reference_b(model, layout, img0, keep)
+        ok, msg = _check_out(y, ref, TOL_E2E)
+        if ok and check_pred:
+            top2 = np.sort(ref, axis=1)[:, -2:]
+            clear = (top2[:, 1] - top2[:, 0]) > 1e-3 * np.abs(ref).max()
+            wrong = np.flatnonzero(clear & (np.argmax(y, 1) != np.argmax(ref, 1)))
+            if wrong.size:
+                ok, msg = False, f"예측 클래스가 다른 이미지 {wrong.size} 장 (예: {wrong[:5].tolist()})"
+            else:
+                msg += f" · 정답률 {np.mean(np.argmax(y, 1) == labels):.0%}"
+        if ok and not np.array_equal(img, img0):
+            ok, msg = False, "입력 이미지를 바꿨습니다"
+        out.append((label, ok, msg))
+    if not all(np.array_equal(params[k], keep[k]) for k in keep):
+        out.append(("params", False, "params 배열을 바꿨습니다 (복사해서 쓰세요)"))
+    return out, state, keep
+
+
+def check_data(model):
+    """Part B 가 쓰는 제공 파일이 원본인지. 문제가 있으면 설명, 없으면 None."""
+    for name in (f"weights/{model}.npz", "samples/cifar10_50.npz"):
+        path = HERE / name
+        if not path.is_file():
+            return f"{name} 이 없습니다"
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != DATA_SHA256[name]:
+            return f"{name} 이 원본과 다릅니다 (git checkout -- {name} 로 되돌리세요)"
+    return None
+
+
 def benchmark_inputs(key, seed, state=None):
     """(index, 인자) 를 차례로 낸다. index 0 은 준비 호출 WARMUP 번 (같은 입력, 재지 않는다),
     그다음은 측정 REPEAT 번 (index 1..REPEAT, 서로 다른 입력).
 
     호출마다 **다른 입력** 을 주므로, 앞 호출의 결과를 저장해 두었다가 다시 쓰는 제출은 빨라지지 않는다.
-    x · 가중치 · BN 이 모두 바뀐다.
+    Part A 는 x · 가중치 · BN 이 모두 바뀌고, Part B 는 state 는 그대로 두고 이미지 50 장이 바뀐다.
     """
     num, layout = key.split("_")
-    size = PROBLEMS[num]["sizes"][0]
-    make = lambda index: make_args(num, layout, size, seed=seed * 100 + 10 + index)    # noqa: E731
+    if PROBLEMS[num]["part"] == "A":
+        size = PROBLEMS[num]["sizes"][0]
+        make = lambda index: make_args(num, layout, size, seed=seed * 100 + 10 + index)    # noqa: E731
+    else:
+        warm = load_samples(layout)[0]
+        make = lambda index: (state, warm if index == 0 else                               # noqa: E731
+                              random_images(layout, N_E2E, seed * 100 + 10 + index))
     args = make(0)
     for _ in range(WARMUP):
         yield 0, args
@@ -485,27 +659,42 @@ def trimmed_mean(samples):
     return math.fsum(kept) / len(kept)
 
 
-def probe_check(key, y, args, originals):
-    """시간 측정 호출 하나의 결과를 검사한다 (전체 출력을 float64 기준값과). 문제가 있으면 설명, 없으면 None."""
+def probe_check(key, y, args, originals, params, rng):
+    """시간 측정 호출 하나의 결과를 검사한다. 문제가 있으면 설명, 없으면 None.
+    Part A 는 전체 출력, Part B 는 무작위로 고른 PROBE_IMAGES 장의 logits 를 float64 기준값과 비교한다."""
     num, layout = key.split("_")
-    ok, msg = _check_out(y, reference_a(num, layout, originals), TOL)
-    if ok and not _same(args, originals):
-        ok, msg = False, "입력 배열을 바꿨습니다"
+    if PROBLEMS[num]["part"] == "A":
+        ok, msg = _check_out(y, reference_a(num, layout, originals), TOL)
+        if ok and not _same(args, originals):
+            ok, msg = False, "입력 배열을 바꿨습니다"
+        return None if ok else msg
+    images = originals[1]
+    n = images.shape[0]
+    if not isinstance(y, np.ndarray) or y.shape != (n, 10):
+        return f"모양이 다릅니다: {getattr(y, 'shape', type(y))} != {(n, 10)}"
+    rows = np.sort(rng.choice(n, min(PROBE_IMAGES, n), replace=False))
+    ok, msg = _check_out(y[rows], reference_b(PROBLEMS[num]["model"], layout, images[rows], params), TOL_E2E)
+    if ok and not np.all(np.isfinite(y)):
+        ok, msg = False, "NaN 또는 inf 가 있습니다"
+    if ok and not np.array_equal(args[1], images):
+        ok, msg = False, "입력 이미지를 바꿨습니다"
     return None if ok else msg
 
 
 def problem_flops(key):
-    """호출 한 번의 명목 연산량 (FLOP) — 합성곱의 곱셈-덧셈 x 2, 정의대로 (패딩 탭 포함) 센다. 실제 크기 한 번."""
+    """호출 한 번의 명목 연산량 (FLOP) — 합성곱 · 완전연결층의 곱셈-덧셈 x 2, 정의대로 (패딩 탭 포함) 센다.
+    Part A 는 실제 크기 한 번, Part B 는 50 장 묶음. 리더보드는 이것을 시간으로 나눈 GFLOP/s 로 순위를 매긴다."""
     num, _ = key.split("_")
-    return flops_a(num, PROBLEMS[num]["sizes"][0])
+    pr = PROBLEMS[num]
+    return flops_a(num, pr["sizes"][0]) if pr["part"] == "A" else flops_b(pr["model"])
 
 
 CORRECT_RATIO = 0.2          # 리더보드 점수에서 통과(정확도)만으로 받는 배점의 비율, 나머지는 시간
-FIXED_POINTS = {}            # 문제별 배점 (NCHW + NHWC 합)을 정해 둘 문제. 나머지 문제는 남은 점수를 연산량에 비례해 나눈다
+FIXED_POINTS = {"05": 40.0, "06": 52.0}     # 문제별 배점 (NCHW + NHWC 합, 7주차와 같다). 나머지는 남은 점수를 연산량에 비례해
 
 
 def problem_points(total=100.0):
-    """(조교용) 리더보드 배점 {파일: 점수}, 합 total. FIXED_POINTS 밖의 문제는 남은 점수를 연산량에 비례해
+    """(조교용) 리더보드 배점 {파일: 점수}, 합 total. 05 · 06 은 FIXED_POINTS, 01–04 는 남은 점수를 연산량에 비례해
     나누고, 한 문제의 배점은 NCHW 판과 NHWC 판이 반씩 갖는다. 소수 둘째 자리 (반올림 차이는 큰 파일부터 0.01 씩)."""
     flops = {num: problem_flops(f"{num}_nchw") for num in PROBLEMS if num not in FIXED_POINTS}
     rest = total - sum(FIXED_POINTS.values())
@@ -659,12 +848,13 @@ def check_profile(prof):
 
 
 def naive_starter(num, layout):
-    """(조교용 --baseline) 출발점 코드 (스케줄 없음) 의 함수. starter/ 에 템플릿의 출발점 파일을 둔다."""
+    """(조교용 --baseline) 출발점 코드 (스케줄 없음) 의 함수들. starter/ 에 템플릿의 출발점 파일을 둔다.
+    Part A 는 (연산 함수,), Part B 는 (prepare, infer)."""
     path = HERE / "starter" / f"submission{num}_{layout}.py"
     spec = importlib.util.spec_from_file_location(f"starter{num}_{layout}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return getattr(module, f"{PROBLEMS[num]['fn']}_{layout}")
+    return tuple(getattr(module, name) for name in entry_names(f"{num}_{layout}"))
 
 
 # ================================================= 문제 하나 채점 · 리더보드 제출
@@ -765,7 +955,10 @@ def failure(key, reason, **extra):
 
 def entry_names(key):
     num, layout = key.split("_")
-    return [f"{PROBLEMS[num]['fn']}_{layout}"]
+    pr = PROBLEMS[num]
+    if pr["part"] == "A":
+        return [f"{pr['fn']}_{layout}"]
+    return [f"prepare_{layout}", f"infer_{layout}"]
 
 
 def log(message):
@@ -784,6 +977,10 @@ def grade_file(key, path=None, timed=True, baseline=False):
     if violations:
         return failure(key, "; ".join(f"{path.name}:{line} {what}" if line else what for line, what in violations),
                        violations=violations)
+    if pr["part"] == "B":
+        problem = check_data(pr["model"])
+        if problem:
+            return failure(key, problem)
     seed = run_seed()
     log(f"[{key}] {pr['name']} · {path.name} · seed {seed}")
     pin()
@@ -806,7 +1003,10 @@ def grade_file(key, path=None, timed=True, baseline=False):
         return failure(key, f"함수가 없습니다: {', '.join(missing)}", seed=seed)
     fns = [getattr(module, name) for name in entry_names(key)]
     timing = {"first_s": 0.0}
-    checks = validate_a(fns[0], num, layout, seed, timing)
+    if pr["part"] == "A":
+        checks, state, params = validate_a(fns[0], num, layout, seed, timing), None, None
+    else:
+        checks, state, params = validate_b(fns[0], fns[1], pr["model"], layout, seed, timing)
     for label, ok, message in checks:
         log(f"  [{'PASS' if ok else 'FAIL'}] 정확도 {label}: {message}")
     if not all(ok for _, ok, _ in checks) or len(checks) != 3:
@@ -821,7 +1021,8 @@ def grade_file(key, path=None, timed=True, baseline=False):
     run = fns[-1]
     samples = []
     if timed:
-        for index, args in benchmark_inputs(key, seed):
+        rng = np.random.default_rng([seed, 99])
+        for index, args in benchmark_inputs(key, seed, state):
             if index == 0:                          # 준비 호출 — 재지도, 검사하지도 않는다
                 run(*args)
                 continue
@@ -829,13 +1030,13 @@ def grade_file(key, path=None, timed=True, baseline=False):
             started = time.perf_counter()
             y = run(*args)
             elapsed = time.perf_counter() - started
-            problem = probe_check(key, y, args, originals)
+            problem = probe_check(key, y, args, originals, params, rng)
             if problem:
                 return failure(key, f"시간 측정 입력 {index}: {problem}", checks=checks, seed=seed)
             samples.append(elapsed)
             log(f"  측정 {index}/{REPEAT}: {elapsed * 1e3:.2f} ms")
             del y, args, originals
-    profile_args = next(benchmark_inputs(key, seed))[1]
+    profile_args = next(benchmark_inputs(key, seed, state))[1]
     profile = profile_call(module, entry_names(key)[-1], profile_args)
     violations = check_runtime(before) + check_profile(profile)
     if violations:
@@ -845,6 +1046,8 @@ def grade_file(key, path=None, timed=True, baseline=False):
               "reason": "", "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
               "verifier_sha256": verifier_sha256(), "seed": seed,
               "machine": {"system": platform.system(), "arch": platform.machine(), "model": machine()}}
+    if "prepare_s" in timing:
+        result["prepare_s"] = timing["prepare_s"]
     result["halide_version"] = getattr(hl, "__version__", HALIDE_VERSION)
     if timed:
         result["ms"] = trimmed_mean(samples) * 1000                 # 리더보드에 보내는 값
@@ -853,7 +1056,12 @@ def grade_file(key, path=None, timed=True, baseline=False):
         result["base_ms"], result["goal_ms"] = TIME_MS[key]
         result["gflops"] = gflops(key, result["ms"])
     if baseline:
-        result["naive_ms"] = trimmed_mean(measure(naive_starter(num, layout), benchmark_inputs(key, seed))) * 1000
+        if pr["part"] == "A":
+            naive, naive_state = naive_starter(num, layout)[0], None
+        else:
+            prepare_b, naive = naive_starter(num, layout)
+            naive_state = prepare_b(load_params(pr["model"], layout))
+        result["naive_ms"] = trimmed_mean(measure(naive, benchmark_inputs(key, seed, naive_state))) * 1000
     return result
 
 
@@ -912,9 +1120,9 @@ def _keys(values):
             result.extend(f"{value}_{layout}" for layout in LAYOUTS)
             continue
         name = Path(value).name
-        match = re.fullmatch(r"(?:submission|answer)?(0[1-4]_(?:nchw|nhwc))(?:\.py)?", name)
+        match = re.fullmatch(r"(?:submission|answer)?(0[1-6]_(?:nchw|nhwc))(?:\.py)?", name)
         if not match:
-            raise ValueError(f"제출 파일 이름이 유효하지 않습니다: {value} (예: submission01_nchw.py, 04_nhwc, 03)")
+            raise ValueError(f"제출 파일 이름이 유효하지 않습니다: {value} (예: submission01_nchw.py, 05_nhwc, 03)")
         result.append(match.group(1))
     return list(dict.fromkeys(result))
 
@@ -936,12 +1144,14 @@ def period_spec():
         uv run python -c "import verify, json; print(json.dumps(verify.period_spec(), ensure_ascii=False, indent=2))"
     """
     return {
-        "id": PERIOD, "title": "11주차", "subtitle": "Halide 스케줄 · 알고리즘과 스케줄의 분리 · NCHW / NHWC",
+        "id": PERIOD, "title": "11주차", "subtitle": "Halide 스케줄 · 연산 퓨전 + 모델 전체 · NCHW / NHWC",
         "kind": "weekly", "order": 11, "fixture_id": FIXTURE_ID, "runtime_checks": True, "metric": "ms",
         "classroom_assignment": "week-11",      # Classroom50 과제 이름 — 이 과제의 제출 기간 안의 푸시만 순위에 반영
         # 점수로 순위: 파일 점수는 leaderboard_points() (목표보다 빠르면 상한 없이 GOAL / t 배), 배점은 problem_points().
         # 점수가 같으면 파일별 GFLOP/s 의 조화평균이 큰 쪽이 앞선다
         "ranking": "points", "correct_ratio": CORRECT_RATIO, "beyond_goal": "speedup",
+        # 실행 확인 (리더보드 integrity.py): 이 파일들이 템플릿과 같은 커밋의 결과만 받는다
+        "integrity": {"protected": ["verify.py", "pyproject.toml", "uv.lock", ".python-version"]},
         "problems": [{"key": key, "filename": f"submission{key}.py", "title": PROBLEMS[key[:2]]["name"],
                       "check_count": 3, "base_ms": base, "goal_ms": goal, "flops": problem_flops(key),
                       "points": problem_points()[key]}

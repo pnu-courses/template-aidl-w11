@@ -1,0 +1,945 @@
+{
+ "stem.conv.weight": [
+  32,
+  3,
+  3,
+  3
+ ],
+ "stem.bn.weight": [
+  32
+ ],
+ "stem.bn.bias": [
+  32
+ ],
+ "stem.bn.running_mean": [
+  32
+ ],
+ "stem.bn.running_var": [
+  32
+ ],
+ "blocks.0.dw.conv.weight": [
+  32,
+  1,
+  3,
+  3
+ ],
+ "blocks.0.dw.bn.weight": [
+  32
+ ],
+ "blocks.0.dw.bn.bias": [
+  32
+ ],
+ "blocks.0.dw.bn.running_mean": [
+  32
+ ],
+ "blocks.0.dw.bn.running_var": [
+  32
+ ],
+ "blocks.0.project.conv.weight": [
+  16,
+  32,
+  1,
+  1
+ ],
+ "blocks.0.project.bn.weight": [
+  16
+ ],
+ "blocks.0.project.bn.bias": [
+  16
+ ],
+ "blocks.0.project.bn.running_mean": [
+  16
+ ],
+ "blocks.0.project.bn.running_var": [
+  16
+ ],
+ "blocks.1.expand.conv.weight": [
+  96,
+  16,
+  1,
+  1
+ ],
+ "blocks.1.expand.bn.weight": [
+  96
+ ],
+ "blocks.1.expand.bn.bias": [
+  96
+ ],
+ "blocks.1.expand.bn.running_mean": [
+  96
+ ],
+ "blocks.1.expand.bn.running_var": [
+  96
+ ],
+ "blocks.1.dw.conv.weight": [
+  96,
+  1,
+  3,
+  3
+ ],
+ "blocks.1.dw.bn.weight": [
+  96
+ ],
+ "blocks.1.dw.bn.bias": [
+  96
+ ],
+ "blocks.1.dw.bn.running_mean": [
+  96
+ ],
+ "blocks.1.dw.bn.running_var": [
+  96
+ ],
+ "blocks.1.project.conv.weight": [
+  24,
+  96,
+  1,
+  1
+ ],
+ "blocks.1.project.bn.weight": [
+  24
+ ],
+ "blocks.1.project.bn.bias": [
+  24
+ ],
+ "blocks.1.project.bn.running_mean": [
+  24
+ ],
+ "blocks.1.project.bn.running_var": [
+  24
+ ],
+ "blocks.2.expand.conv.weight": [
+  144,
+  24,
+  1,
+  1
+ ],
+ "blocks.2.expand.bn.weight": [
+  144
+ ],
+ "blocks.2.expand.bn.bias": [
+  144
+ ],
+ "blocks.2.expand.bn.running_mean": [
+  144
+ ],
+ "blocks.2.expand.bn.running_var": [
+  144
+ ],
+ "blocks.2.dw.conv.weight": [
+  144,
+  1,
+  3,
+  3
+ ],
+ "blocks.2.dw.bn.weight": [
+  144
+ ],
+ "blocks.2.dw.bn.bias": [
+  144
+ ],
+ "blocks.2.dw.bn.running_mean": [
+  144
+ ],
+ "blocks.2.dw.bn.running_var": [
+  144
+ ],
+ "blocks.2.project.conv.weight": [
+  24,
+  144,
+  1,
+  1
+ ],
+ "blocks.2.project.bn.weight": [
+  24
+ ],
+ "blocks.2.project.bn.bias": [
+  24
+ ],
+ "blocks.2.project.bn.running_mean": [
+  24
+ ],
+ "blocks.2.project.bn.running_var": [
+  24
+ ],
+ "blocks.3.expand.conv.weight": [
+  144,
+  24,
+  1,
+  1
+ ],
+ "blocks.3.expand.bn.weight": [
+  144
+ ],
+ "blocks.3.expand.bn.bias": [
+  144
+ ],
+ "blocks.3.expand.bn.running_mean": [
+  144
+ ],
+ "blocks.3.expand.bn.running_var": [
+  144
+ ],
+ "blocks.3.dw.conv.weight": [
+  144,
+  1,
+  3,
+  3
+ ],
+ "blocks.3.dw.bn.weight": [
+  144
+ ],
+ "blocks.3.dw.bn.bias": [
+  144
+ ],
+ "blocks.3.dw.bn.running_mean": [
+  144
+ ],
+ "blocks.3.dw.bn.running_var": [
+  144
+ ],
+ "blocks.3.project.conv.weight": [
+  32,
+  144,
+  1,
+  1
+ ],
+ "blocks.3.project.bn.weight": [
+  32
+ ],
+ "blocks.3.project.bn.bias": [
+  32
+ ],
+ "blocks.3.project.bn.running_mean": [
+  32
+ ],
+ "blocks.3.project.bn.running_var": [
+  32
+ ],
+ "blocks.4.expand.conv.weight": [
+  192,
+  32,
+  1,
+  1
+ ],
+ "blocks.4.expand.bn.weight": [
+  192
+ ],
+ "blocks.4.expand.bn.bias": [
+  192
+ ],
+ "blocks.4.expand.bn.running_mean": [
+  192
+ ],
+ "blocks.4.expand.bn.running_var": [
+  192
+ ],
+ "blocks.4.dw.conv.weight": [
+  192,
+  1,
+  3,
+  3
+ ],
+ "blocks.4.dw.bn.weight": [
+  192
+ ],
+ "blocks.4.dw.bn.bias": [
+  192
+ ],
+ "blocks.4.dw.bn.running_mean": [
+  192
+ ],
+ "blocks.4.dw.bn.running_var": [
+  192
+ ],
+ "blocks.4.project.conv.weight": [
+  32,
+  192,
+  1,
+  1
+ ],
+ "blocks.4.project.bn.weight": [
+  32
+ ],
+ "blocks.4.project.bn.bias": [
+  32
+ ],
+ "blocks.4.project.bn.running_mean": [
+  32
+ ],
+ "blocks.4.project.bn.running_var": [
+  32
+ ],
+ "blocks.5.expand.conv.weight": [
+  192,
+  32,
+  1,
+  1
+ ],
+ "blocks.5.expand.bn.weight": [
+  192
+ ],
+ "blocks.5.expand.bn.bias": [
+  192
+ ],
+ "blocks.5.expand.bn.running_mean": [
+  192
+ ],
+ "blocks.5.expand.bn.running_var": [
+  192
+ ],
+ "blocks.5.dw.conv.weight": [
+  192,
+  1,
+  3,
+  3
+ ],
+ "blocks.5.dw.bn.weight": [
+  192
+ ],
+ "blocks.5.dw.bn.bias": [
+  192
+ ],
+ "blocks.5.dw.bn.running_mean": [
+  192
+ ],
+ "blocks.5.dw.bn.running_var": [
+  192
+ ],
+ "blocks.5.project.conv.weight": [
+  32,
+  192,
+  1,
+  1
+ ],
+ "blocks.5.project.bn.weight": [
+  32
+ ],
+ "blocks.5.project.bn.bias": [
+  32
+ ],
+ "blocks.5.project.bn.running_mean": [
+  32
+ ],
+ "blocks.5.project.bn.running_var": [
+  32
+ ],
+ "blocks.6.expand.conv.weight": [
+  192,
+  32,
+  1,
+  1
+ ],
+ "blocks.6.expand.bn.weight": [
+  192
+ ],
+ "blocks.6.expand.bn.bias": [
+  192
+ ],
+ "blocks.6.expand.bn.running_mean": [
+  192
+ ],
+ "blocks.6.expand.bn.running_var": [
+  192
+ ],
+ "blocks.6.dw.conv.weight": [
+  192,
+  1,
+  3,
+  3
+ ],
+ "blocks.6.dw.bn.weight": [
+  192
+ ],
+ "blocks.6.dw.bn.bias": [
+  192
+ ],
+ "blocks.6.dw.bn.running_mean": [
+  192
+ ],
+ "blocks.6.dw.bn.running_var": [
+  192
+ ],
+ "blocks.6.project.conv.weight": [
+  64,
+  192,
+  1,
+  1
+ ],
+ "blocks.6.project.bn.weight": [
+  64
+ ],
+ "blocks.6.project.bn.bias": [
+  64
+ ],
+ "blocks.6.project.bn.running_mean": [
+  64
+ ],
+ "blocks.6.project.bn.running_var": [
+  64
+ ],
+ "blocks.7.expand.conv.weight": [
+  384,
+  64,
+  1,
+  1
+ ],
+ "blocks.7.expand.bn.weight": [
+  384
+ ],
+ "blocks.7.expand.bn.bias": [
+  384
+ ],
+ "blocks.7.expand.bn.running_mean": [
+  384
+ ],
+ "blocks.7.expand.bn.running_var": [
+  384
+ ],
+ "blocks.7.dw.conv.weight": [
+  384,
+  1,
+  3,
+  3
+ ],
+ "blocks.7.dw.bn.weight": [
+  384
+ ],
+ "blocks.7.dw.bn.bias": [
+  384
+ ],
+ "blocks.7.dw.bn.running_mean": [
+  384
+ ],
+ "blocks.7.dw.bn.running_var": [
+  384
+ ],
+ "blocks.7.project.conv.weight": [
+  64,
+  384,
+  1,
+  1
+ ],
+ "blocks.7.project.bn.weight": [
+  64
+ ],
+ "blocks.7.project.bn.bias": [
+  64
+ ],
+ "blocks.7.project.bn.running_mean": [
+  64
+ ],
+ "blocks.7.project.bn.running_var": [
+  64
+ ],
+ "blocks.8.expand.conv.weight": [
+  384,
+  64,
+  1,
+  1
+ ],
+ "blocks.8.expand.bn.weight": [
+  384
+ ],
+ "blocks.8.expand.bn.bias": [
+  384
+ ],
+ "blocks.8.expand.bn.running_mean": [
+  384
+ ],
+ "blocks.8.expand.bn.running_var": [
+  384
+ ],
+ "blocks.8.dw.conv.weight": [
+  384,
+  1,
+  3,
+  3
+ ],
+ "blocks.8.dw.bn.weight": [
+  384
+ ],
+ "blocks.8.dw.bn.bias": [
+  384
+ ],
+ "blocks.8.dw.bn.running_mean": [
+  384
+ ],
+ "blocks.8.dw.bn.running_var": [
+  384
+ ],
+ "blocks.8.project.conv.weight": [
+  64,
+  384,
+  1,
+  1
+ ],
+ "blocks.8.project.bn.weight": [
+  64
+ ],
+ "blocks.8.project.bn.bias": [
+  64
+ ],
+ "blocks.8.project.bn.running_mean": [
+  64
+ ],
+ "blocks.8.project.bn.running_var": [
+  64
+ ],
+ "blocks.9.expand.conv.weight": [
+  384,
+  64,
+  1,
+  1
+ ],
+ "blocks.9.expand.bn.weight": [
+  384
+ ],
+ "blocks.9.expand.bn.bias": [
+  384
+ ],
+ "blocks.9.expand.bn.running_mean": [
+  384
+ ],
+ "blocks.9.expand.bn.running_var": [
+  384
+ ],
+ "blocks.9.dw.conv.weight": [
+  384,
+  1,
+  3,
+  3
+ ],
+ "blocks.9.dw.bn.weight": [
+  384
+ ],
+ "blocks.9.dw.bn.bias": [
+  384
+ ],
+ "blocks.9.dw.bn.running_mean": [
+  384
+ ],
+ "blocks.9.dw.bn.running_var": [
+  384
+ ],
+ "blocks.9.project.conv.weight": [
+  64,
+  384,
+  1,
+  1
+ ],
+ "blocks.9.project.bn.weight": [
+  64
+ ],
+ "blocks.9.project.bn.bias": [
+  64
+ ],
+ "blocks.9.project.bn.running_mean": [
+  64
+ ],
+ "blocks.9.project.bn.running_var": [
+  64
+ ],
+ "blocks.10.expand.conv.weight": [
+  384,
+  64,
+  1,
+  1
+ ],
+ "blocks.10.expand.bn.weight": [
+  384
+ ],
+ "blocks.10.expand.bn.bias": [
+  384
+ ],
+ "blocks.10.expand.bn.running_mean": [
+  384
+ ],
+ "blocks.10.expand.bn.running_var": [
+  384
+ ],
+ "blocks.10.dw.conv.weight": [
+  384,
+  1,
+  3,
+  3
+ ],
+ "blocks.10.dw.bn.weight": [
+  384
+ ],
+ "blocks.10.dw.bn.bias": [
+  384
+ ],
+ "blocks.10.dw.bn.running_mean": [
+  384
+ ],
+ "blocks.10.dw.bn.running_var": [
+  384
+ ],
+ "blocks.10.project.conv.weight": [
+  96,
+  384,
+  1,
+  1
+ ],
+ "blocks.10.project.bn.weight": [
+  96
+ ],
+ "blocks.10.project.bn.bias": [
+  96
+ ],
+ "blocks.10.project.bn.running_mean": [
+  96
+ ],
+ "blocks.10.project.bn.running_var": [
+  96
+ ],
+ "blocks.11.expand.conv.weight": [
+  576,
+  96,
+  1,
+  1
+ ],
+ "blocks.11.expand.bn.weight": [
+  576
+ ],
+ "blocks.11.expand.bn.bias": [
+  576
+ ],
+ "blocks.11.expand.bn.running_mean": [
+  576
+ ],
+ "blocks.11.expand.bn.running_var": [
+  576
+ ],
+ "blocks.11.dw.conv.weight": [
+  576,
+  1,
+  3,
+  3
+ ],
+ "blocks.11.dw.bn.weight": [
+  576
+ ],
+ "blocks.11.dw.bn.bias": [
+  576
+ ],
+ "blocks.11.dw.bn.running_mean": [
+  576
+ ],
+ "blocks.11.dw.bn.running_var": [
+  576
+ ],
+ "blocks.11.project.conv.weight": [
+  96,
+  576,
+  1,
+  1
+ ],
+ "blocks.11.project.bn.weight": [
+  96
+ ],
+ "blocks.11.project.bn.bias": [
+  96
+ ],
+ "blocks.11.project.bn.running_mean": [
+  96
+ ],
+ "blocks.11.project.bn.running_var": [
+  96
+ ],
+ "blocks.12.expand.conv.weight": [
+  576,
+  96,
+  1,
+  1
+ ],
+ "blocks.12.expand.bn.weight": [
+  576
+ ],
+ "blocks.12.expand.bn.bias": [
+  576
+ ],
+ "blocks.12.expand.bn.running_mean": [
+  576
+ ],
+ "blocks.12.expand.bn.running_var": [
+  576
+ ],
+ "blocks.12.dw.conv.weight": [
+  576,
+  1,
+  3,
+  3
+ ],
+ "blocks.12.dw.bn.weight": [
+  576
+ ],
+ "blocks.12.dw.bn.bias": [
+  576
+ ],
+ "blocks.12.dw.bn.running_mean": [
+  576
+ ],
+ "blocks.12.dw.bn.running_var": [
+  576
+ ],
+ "blocks.12.project.conv.weight": [
+  96,
+  576,
+  1,
+  1
+ ],
+ "blocks.12.project.bn.weight": [
+  96
+ ],
+ "blocks.12.project.bn.bias": [
+  96
+ ],
+ "blocks.12.project.bn.running_mean": [
+  96
+ ],
+ "blocks.12.project.bn.running_var": [
+  96
+ ],
+ "blocks.13.expand.conv.weight": [
+  576,
+  96,
+  1,
+  1
+ ],
+ "blocks.13.expand.bn.weight": [
+  576
+ ],
+ "blocks.13.expand.bn.bias": [
+  576
+ ],
+ "blocks.13.expand.bn.running_mean": [
+  576
+ ],
+ "blocks.13.expand.bn.running_var": [
+  576
+ ],
+ "blocks.13.dw.conv.weight": [
+  576,
+  1,
+  3,
+  3
+ ],
+ "blocks.13.dw.bn.weight": [
+  576
+ ],
+ "blocks.13.dw.bn.bias": [
+  576
+ ],
+ "blocks.13.dw.bn.running_mean": [
+  576
+ ],
+ "blocks.13.dw.bn.running_var": [
+  576
+ ],
+ "blocks.13.project.conv.weight": [
+  160,
+  576,
+  1,
+  1
+ ],
+ "blocks.13.project.bn.weight": [
+  160
+ ],
+ "blocks.13.project.bn.bias": [
+  160
+ ],
+ "blocks.13.project.bn.running_mean": [
+  160
+ ],
+ "blocks.13.project.bn.running_var": [
+  160
+ ],
+ "blocks.14.expand.conv.weight": [
+  960,
+  160,
+  1,
+  1
+ ],
+ "blocks.14.expand.bn.weight": [
+  960
+ ],
+ "blocks.14.expand.bn.bias": [
+  960
+ ],
+ "blocks.14.expand.bn.running_mean": [
+  960
+ ],
+ "blocks.14.expand.bn.running_var": [
+  960
+ ],
+ "blocks.14.dw.conv.weight": [
+  960,
+  1,
+  3,
+  3
+ ],
+ "blocks.14.dw.bn.weight": [
+  960
+ ],
+ "blocks.14.dw.bn.bias": [
+  960
+ ],
+ "blocks.14.dw.bn.running_mean": [
+  960
+ ],
+ "blocks.14.dw.bn.running_var": [
+  960
+ ],
+ "blocks.14.project.conv.weight": [
+  160,
+  960,
+  1,
+  1
+ ],
+ "blocks.14.project.bn.weight": [
+  160
+ ],
+ "blocks.14.project.bn.bias": [
+  160
+ ],
+ "blocks.14.project.bn.running_mean": [
+  160
+ ],
+ "blocks.14.project.bn.running_var": [
+  160
+ ],
+ "blocks.15.expand.conv.weight": [
+  960,
+  160,
+  1,
+  1
+ ],
+ "blocks.15.expand.bn.weight": [
+  960
+ ],
+ "blocks.15.expand.bn.bias": [
+  960
+ ],
+ "blocks.15.expand.bn.running_mean": [
+  960
+ ],
+ "blocks.15.expand.bn.running_var": [
+  960
+ ],
+ "blocks.15.dw.conv.weight": [
+  960,
+  1,
+  3,
+  3
+ ],
+ "blocks.15.dw.bn.weight": [
+  960
+ ],
+ "blocks.15.dw.bn.bias": [
+  960
+ ],
+ "blocks.15.dw.bn.running_mean": [
+  960
+ ],
+ "blocks.15.dw.bn.running_var": [
+  960
+ ],
+ "blocks.15.project.conv.weight": [
+  160,
+  960,
+  1,
+  1
+ ],
+ "blocks.15.project.bn.weight": [
+  160
+ ],
+ "blocks.15.project.bn.bias": [
+  160
+ ],
+ "blocks.15.project.bn.running_mean": [
+  160
+ ],
+ "blocks.15.project.bn.running_var": [
+  160
+ ],
+ "blocks.16.expand.conv.weight": [
+  960,
+  160,
+  1,
+  1
+ ],
+ "blocks.16.expand.bn.weight": [
+  960
+ ],
+ "blocks.16.expand.bn.bias": [
+  960
+ ],
+ "blocks.16.expand.bn.running_mean": [
+  960
+ ],
+ "blocks.16.expand.bn.running_var": [
+  960
+ ],
+ "blocks.16.dw.conv.weight": [
+  960,
+  1,
+  3,
+  3
+ ],
+ "blocks.16.dw.bn.weight": [
+  960
+ ],
+ "blocks.16.dw.bn.bias": [
+  960
+ ],
+ "blocks.16.dw.bn.running_mean": [
+  960
+ ],
+ "blocks.16.dw.bn.running_var": [
+  960
+ ],
+ "blocks.16.project.conv.weight": [
+  320,
+  960,
+  1,
+  1
+ ],
+ "blocks.16.project.bn.weight": [
+  320
+ ],
+ "blocks.16.project.bn.bias": [
+  320
+ ],
+ "blocks.16.project.bn.running_mean": [
+  320
+ ],
+ "blocks.16.project.bn.running_var": [
+  320
+ ],
+ "head.conv.weight": [
+  1280,
+  320,
+  1,
+  1
+ ],
+ "head.bn.weight": [
+  1280
+ ],
+ "head.bn.bias": [
+  1280
+ ],
+ "head.bn.running_mean": [
+  1280
+ ],
+ "head.bn.running_var": [
+  1280
+ ],
+ "fc.weight": [
+  10,
+  1280
+ ],
+ "fc.bias": [
+  10
+ ]
+}

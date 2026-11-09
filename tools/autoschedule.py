@@ -53,6 +53,9 @@ def main(argv):
     key = argv[0]
     names = argv[1:] or list(PLUGINS)
     num, layout = key.split("_")
+    if verify.PROBLEMS[num]["part"] != "A":
+        print("자동 스케줄러 도구는 Part A (01 – 04) 만 지원합니다. Part B 는 Part A 에서 고른 합성곱 스케줄을 층마다 거세요.")
+        return 1
     size = verify.PROBLEMS[num]["sizes"][0]
     args = verify.make_args(num, layout, size, seed=0)
     ref = verify.reference_a(num, layout, args)
