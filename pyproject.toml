@@ -1,7 +1,7 @@
 [project]
 name = "week11-halide-schedule"
 version = "0.1.0"
-description = "제11주 과제 - Halide 스케줄 (알고리즘과 스케줄의 분리 · 단일 스레드 · 7주차 연산 4 문제 x NCHW/NHWC 8 파일)"
+description = "제11주 과제 - Halide 스케줄 (알고리즘과 스케줄의 분리 · 단일 스레드 · 7주차 문제 6개(연산 4 + 모델 2) x NCHW/NHWC 12 파일)"
 requires-python = "==3.12.*"
 dependencies = ["numpy", "halide==22.1.0"]
 
